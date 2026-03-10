@@ -12,21 +12,25 @@ export const seedDatabase = async () => {
 
     // 2. Add Players
     const playerDatas = [
-        { name: 'Sachin Tendulkar' }, { name: 'Virat Kohli' }, { name: 'MS Dhoni' }, 
-        { name: 'Rohit Sharma' }, { name: 'Hardik Pandya' }, { name: 'Ravindra Jadeja' }, 
-        { name: 'Jasprit Bumrah' }, { name: 'AB de Villiers' }, { name: 'Chris Gayle' }, 
-        { name: 'Ben Stokes' }, { name: 'Rishabh Pant' }, { name: 'Shubman Gill' }
+        { name: 'Rishabh' }, { name: 'Puru' }, { name: 'Chakli' },
+        { name: 'Deep' }, { name: 'Jay' }, { name: 'Atul' },
+        { name: 'Sagar' }, { name: 'Shaggy' }, { name: 'Sahil' },
+        { name: 'Ani' }, { name: 'Ved' }, { name: 'Bobby' }, { name: 'Dixit' }
     ];
-    
-    const players: Player[] = playerDatas.map(p => ({ id: uuidv4(), name: p.name }));
+
+    const players: Player[] = playerDatas.map(p => ({
+        id: uuidv4(),
+        name: p.name,
+        is_morya_warrior: true
+    }));
     await db.players.bulkAdd(players);
 
     // 3. Create a Match
-    const teamA = 'India Stars';
+    const teamA = 'Morya Warriors';
     const teamB = 'World Icons';
-    const teamAPlayers = players.slice(0, 6).map(p => p.id);
-    const teamBPlayers = players.slice(6, 12).map(p => p.id);
-    
+    const teamAPlayers = players.slice(0, 7).map(p => p.id);
+    const teamBPlayers = players.slice(7, 13).map(p => p.id);
+
     const matchId = uuidv4();
     await db.matches.add({
         id: matchId,

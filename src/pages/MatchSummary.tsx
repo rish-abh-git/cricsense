@@ -4,7 +4,10 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../database/db';
 import Button from '../components/Button';
 import Card from '../components/Card';
-import { Share2, Home, MessageSquareQuote } from 'lucide-react';
+import { Share2, Home, MessageSquareQuote, Trash2 } from 'lucide-react';
+import { generateBallWiseSummary } from '../utils/shareUtils';
+import { useToast } from '../components/Toast';
+import Modal from '../components/Modal';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -23,19 +26,31 @@ ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarEleme
 const MatchSummary: React.FC = () => {
   const { matchId } = useParams();
   const navigate = useNavigate();
+  const { showToast } = useToast();
 
   const match = useLiveQuery(() => db.matches.get(matchId || ''));
   const innings = useLiveQuery(() => db.innings.where('match_id').equals(matchId || '').toArray());
   const balls = useLiveQuery(() => db.balls.toArray());
   const players = useLiveQuery(() => db.players.toArray());
 
+  const [modalConfig, setModalConfig] = React.useState<{
+    isOpen: boolean,
+    title: string,
+    message: string,
+    confirmLabel?: string,
+    onConfirm?: () => void,
+    type?: 'danger' | 'info' | 'success'
+  }>({ isOpen: false, title: '', message: '' });
+
+  const closeModal = () => setModalConfig(prev => ({ ...prev, isOpen: false }));
+
   const { chartData, topScorer, bestBowler, stats, summaryText } = useMemo(() => {
     if (!match || !innings || !balls || !players) return { chartData: null, topScorer: null, bestBowler: null, stats: null, summaryText: '' };
-    
+
     // Calculate Winner
     const i1 = innings.find(i => i.innings_number === 1);
     const i2 = innings.find(i => i.innings_number === 2);
-    
+
     let winner = 'Draw / Pending';
     if (i1 && i2 && match.status === 'completed') {
       if (i1.runs > i2.runs) winner = `${i1.batting_team} won by ${i1.runs - i2.runs} runs`;
@@ -49,16 +64,16 @@ const MatchSummary: React.FC = () => {
     let totalDots = 0;
     let totalBoundaries = 0;
     let totalLegalBalls = 0;
-    
+
     const mBalls = balls.filter(b => innings.some(i => i.id === b.innings_id));
-    
+
     mBalls.forEach(b => {
       // Batter stats
       const bStat = batsmanStats.get(b.batsman_id) || { runs: 0, balls: 0 };
       bStat.runs += b.runs;
       if (b.extra_type !== 'wide') bStat.balls += 1;
       batsmanStats.set(b.batsman_id, bStat);
-      
+
       // Bowler stats
       const blStat = bowlerStats.get(b.bowler_id) || { wickets: 0, runs: 0 };
       blStat.runs += b.runs + b.extra_runs;
@@ -73,21 +88,21 @@ const MatchSummary: React.FC = () => {
 
     let topSm = { id: '', runs: -1, balls: 0 };
     batsmanStats.forEach((stat, id) => {
-       if (stat.runs > topSm.runs) { topSm = { id, ...stat }; }
+      if (stat.runs > topSm.runs) { topSm = { id, ...stat }; }
     });
 
     let bestBm = { id: '', wickets: -1, runs: 999 };
     bowlerStats.forEach((stat, id) => {
-       if (stat.wickets > bestBm.wickets || (stat.wickets === bestBm.wickets && stat.runs < bestBm.runs)) { 
-         bestBm = { id, ...stat }; 
-       }
+      if (stat.wickets > bestBm.wickets || (stat.wickets === bestBm.wickets && stat.runs < bestBm.runs)) {
+        bestBm = { id, ...stat };
+      }
     });
 
     const tsPlayer = players.find(p => p.id === topSm.id);
     const bbPlayer = players.find(p => p.id === bestBm.id);
 
     // Chart logic
-    const overLabels = Array.from({length: match.overs}, (_, i) => `Over ${i+1}`);
+    const overLabels = Array.from({ length: match.overs }, (_, i) => `Over ${i + 1}`);
     const team1Data = new Array(match.overs).fill(0);
     const team2Data = new Array(match.overs).fill(0);
 
@@ -117,14 +132,14 @@ const MatchSummary: React.FC = () => {
       `⭐ Top Scorer: ${tsPlayer?.name || '-'} ${topSm.runs} (${topSm.balls})\n` +
       `🎯 Best Bowler: ${bbPlayer?.name || '-'} ${bestBm.wickets}/${bestBm.runs}\n\n` +
       `📊 Team Analytics:\n` +
-      `Dot Balls: ${Math.round((totalDots/Math.max(1, totalLegalBalls))*100)}%\n` +
-      `Boundaries: ${Math.round((totalBoundaries/Math.max(1, totalLegalBalls))*100)}%`;
+      `Dot Balls: ${Math.round((totalDots / Math.max(1, totalLegalBalls)) * 100)}%\n` +
+      `Boundaries: ${Math.round((totalBoundaries / Math.max(1, totalLegalBalls)) * 100)}%`;
 
-    return { 
-      chartData: cdata, 
+    return {
+      chartData: cdata,
       topScorer: tsPlayer ? `${tsPlayer.name} ${topSm.runs} (${topSm.balls})` : '-',
       bestBowler: bbPlayer ? `${bbPlayer.name} ${bestBm.wickets}/${bestBm.runs}` : '-',
-      stats: { dotPct: Math.round((totalDots/(totalLegalBalls||1))*100), bndPct: Math.round((totalBoundaries/(totalLegalBalls||1))*100), winner },
+      stats: { dotPct: Math.round((totalDots / (totalLegalBalls || 1)) * 100), bndPct: Math.round((totalBoundaries / (totalLegalBalls || 1)) * 100), winner },
       summaryText: sText
     };
   }, [match, innings, balls, players]);
@@ -147,23 +162,25 @@ const MatchSummary: React.FC = () => {
     }
   };
 
-  const handleExportChatGPT = () => {
-    const chatGPTText = `Analyze this cricket match record from CricSense:\n\n` + 
-      `${summaryText}\n\n` +
+  const handleExportChatGPT = async () => {
+    const detailedText = await generateBallWiseSummary([matchId!]);
+    const chatGPTText = `Analyze this cricket match record from CricSense:\n\n` +
+      `${detailedText}\n\n` +
+      `Match Summary:\n${summaryText}\n\n` +
       `Match Context:\n` +
       `- Played on: ${new Date(match.date).toLocaleDateString()}\n` +
-      `- Format: ${match.overs} overs gully cricket match\n\n` +
-      `Please provide a breakdown of player performances and key turning points.`;
-      
+      `- Format: ${match.overs} overs match\n\n` +
+      `Please provide a breakdown of player performances, key turning points, and detailed stats (dots, boundaries faced).`;
+
     navigator.clipboard.writeText(chatGPTText).then(() => {
-      alert('Match data copied! You can now paste it into ChatGPT.');
+      showToast('Detailed match data copied for ChatGPT!', 'success');
     });
   };
 
   const handleShareViewOnly = async () => {
     const viewUrl = `${window.location.origin}${window.location.pathname}?view=true`;
     const text = `Check out this match summary on CricSense:\n\n${summaryText}\n\nView details: ${viewUrl}`;
-    
+
     if (navigator.share) {
       try {
         await navigator.share({ title: 'CricSense View-Only Match', text });
@@ -172,23 +189,38 @@ const MatchSummary: React.FC = () => {
       }
     } else {
       navigator.clipboard.writeText(text).then(() => {
-        alert('View-only link copied to clipboard!');
+        showToast('View-only link copied to clipboard!', 'info');
       });
     }
+  };
+
+  const handleArchiveMatch = () => {
+    setModalConfig({
+      isOpen: true,
+      title: 'Delete Match?',
+      message: 'This match will be hidden from your home screen, but its data will be kept in the database if you ever need to re-fetch it. Permanent deletion is not recommended if you want to keep history.',
+      confirmLabel: 'Delete (Archive)',
+      type: 'danger',
+      onConfirm: async () => {
+        await db.matches.update(matchId!, { is_archived: true });
+        showToast('Match archived successfully', 'success');
+        navigate('/');
+      }
+    });
   };
 
   return (
     <div className="p-4 pb-24 max-w-lg mx-auto space-y-4">
       <Card className="p-5 text-center bg-gradient-to-br from-primary-600 to-primary-700 text-white border-0 shadow-lg shadow-primary-500/30">
         <h2 className="text-xl font-bold mb-4 opacity-90">Match Result</h2>
-        
+
         {innings.map(inn => (
           <div key={inn.id} className="flex justify-between items-center mb-2 px-2">
             <span className="font-semibold text-lg">{inn.batting_team}</span>
             <span className="font-black text-2xl">{inn.runs}<span className="text-base text-primary-200">/{inn.wickets}</span> <span className="text-xs text-primary-200 font-medium">({inn.overs.toFixed(1)})</span></span>
           </div>
         ))}
-        
+
         <div className="mt-4 pt-3 border-t border-primary-500/50">
           <p className="font-bold text-lg text-amber-300">{stats?.winner}</p>
         </div>
@@ -209,9 +241,9 @@ const MatchSummary: React.FC = () => {
         <h3 className="font-bold text-gray-900 dark:text-gray-50 mb-4">Runs per Over</h3>
         <div className="h-48">
           {chartData && (
-            <Bar 
-              data={chartData} 
-              options={{ maintainAspectRatio: false, responsive: true, plugins: { legend: { position: 'bottom'} } }} 
+            <Bar
+              data={chartData}
+              options={{ maintainAspectRatio: false, responsive: true, plugins: { legend: { position: 'bottom' } } }}
             />
           )}
         </div>
@@ -223,8 +255,8 @@ const MatchSummary: React.FC = () => {
           <p className="text-2xl font-black text-gray-800 dark:text-gray-100">{stats?.dotPct}%</p>
         </div>
         <div className="text-center p-3 bg-gray-50 dark:bg-gray-900 rounded-xl">
-           <p className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase mb-1">Boundaries</p>
-           <p className="text-2xl font-black text-primary-600">{stats?.bndPct}%</p>
+          <p className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase mb-1">Boundaries</p>
+          <p className="text-2xl font-black text-primary-600">{stats?.bndPct}%</p>
         </div>
       </Card>
 
@@ -248,6 +280,21 @@ const MatchSummary: React.FC = () => {
           <Home size={18} /> Back to Home
         </Button>
       </div>
+      <div className="grid grid-cols-1 gap-2 pt-4 border-t dark:border-gray-700">
+        <Button variant="ghost" onClick={handleArchiveMatch} className="flex gap-2.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/10">
+          <Trash2 size={18} /> Delete Match (Keep Data)
+        </Button>
+      </div>
+
+      <Modal
+        isOpen={modalConfig.isOpen}
+        onClose={closeModal}
+        title={modalConfig.title}
+        message={modalConfig.message}
+        confirmLabel={modalConfig.confirmLabel}
+        onConfirm={modalConfig.onConfirm}
+        type={modalConfig.type}
+      />
     </div>
   );
 };

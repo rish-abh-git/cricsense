@@ -4,6 +4,7 @@ export type WicketType = 'bowled' | 'caught' | 'run_out' | 'stumped' | 'lbw' | '
 export interface Player {
   id: string;
   name: string;
+  is_morya_warrior?: boolean;
 }
 
 export interface Match {
@@ -18,6 +19,7 @@ export interface Match {
   winner?: string;
   tossWinner?: string;
   optedTo?: 'bat' | 'bowl';
+  is_archived?: boolean;
 }
 
 export interface Innings {

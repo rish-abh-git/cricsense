@@ -5,14 +5,24 @@ import Button from '../components/Button';
 import Card from '../components/Card';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../database/db';
-import { generateDaySummary, shareText } from '../utils/shareUtils';
-import { Share2 } from 'lucide-react';
+import { generateDaySummary, generateBallWiseSummary, shareText } from '../utils/shareUtils';
+import { Share2, MessageSquareQuote } from 'lucide-react';
+import { useToast } from '../components/Toast';
 
 const Home: React.FC = () => {
   const navigate = useNavigate();
-  
-  const allMatches = useLiveQuery(() => db.matches.orderBy('date').reverse().toArray());
-  const playersCount = useLiveQuery(() => db.players.count());
+  const { showToast } = useToast();
+
+  const allMatches = useLiveQuery(async () => {
+    const matches = await db.matches.reverse().sortBy('date');
+    return matches.filter(m => !m.is_archived);
+  }) || [];
+  const playersCount = useLiveQuery(async () => {
+    const all = await db.players.toArray();
+    return all.filter(p => p.is_morya_warrior).length;
+  });
+  const allInnings = useLiveQuery(() => db.innings.toArray()) || [];
+  const allBalls = useLiveQuery(() => db.balls.toArray()) || [];
 
   const groupedMatches = React.useMemo(() => {
     if (!allMatches) return {};
@@ -29,6 +39,13 @@ const Home: React.FC = () => {
     await shareText(text, `CricSense Summary - ${dateStr}`);
   };
 
+  const handleAIShareDay = async (dateStr: string, matches: any[]) => {
+    const text = await generateBallWiseSummary(matches.map(m => m.id));
+    navigator.clipboard.writeText(text).then(() => {
+      showToast(`Detailed day data (${dateStr}) copied for AI Analysis!`, 'success');
+    });
+  };
+
   const isViewOnly = window.location.search.includes('view=true');
 
   return (
@@ -43,9 +60,9 @@ const Home: React.FC = () => {
 
       {!isViewOnly && (
         <div className="grid grid-cols-1 gap-4">
-          <Button 
-            onClick={() => navigate('/setup')} 
-            size="xl" 
+          <Button
+            onClick={() => navigate('/setup')}
+            size="xl"
             className="w-full flex items-center justify-center gap-2"
           >
             <PlayCircle size={24} />
@@ -75,17 +92,26 @@ const Home: React.FC = () => {
           </div>
         </Card>
       </div>
-      
+
       {Object.entries(groupedMatches).map(([dateStr, matches]) => (
         <section key={dateStr} className="mb-6">
           <div className="flex items-center justify-between mb-3 mt-4 px-1">
-             <h3 className="font-bold text-gray-900 dark:text-gray-50 text-sm">{dateStr}</h3>
-             <button 
-               onClick={() => handleShareDay(dateStr, matches)}
-               className="text-primary-600 flex items-center gap-1.5 text-xs font-semibold bg-primary-50 px-3 py-1.5 rounded-full active:bg-primary-100"
-             >
-               <Share2 size={14} /> Share Day
-             </button>
+            <h3 className="font-bold text-gray-900 dark:text-gray-50 text-sm">{dateStr}</h3>
+            <div className="flex gap-2">
+              <button
+                onClick={() => handleAIShareDay(dateStr, matches)}
+                className="text-primary-600 flex items-center gap-1.5 text-xs font-semibold bg-primary-50 px-3 py-1.5 rounded-full active:bg-primary-100"
+                title="Copy Detail for AI"
+              >
+                <MessageSquareQuote size={14} /> AI Detail
+              </button>
+              <button
+                onClick={() => handleShareDay(dateStr, matches)}
+                className="text-primary-600 flex items-center gap-1.5 text-xs font-semibold bg-primary-50 px-3 py-1.5 rounded-full active:bg-primary-100"
+              >
+                <Share2 size={14} /> Share Day
+              </button>
+            </div>
           </div>
           <div className="space-y-3">
             {matches.map(match => (

@@ -3,23 +3,41 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../database/db';
 import { AttendanceRepo } from '../database/repository';
 import Card from '../components/Card';
-import { Calendar, Users, CheckCircle2, Circle } from 'lucide-react';
+import { Calendar, Users, CheckCircle2, Circle, ChevronLeft, ChevronRight, LayoutGrid, List } from 'lucide-react';
 
 const Attendance: React.FC = () => {
-  const [selectedDate] = useState<number>(() => {
+  const [selectedDate, setSelectedDate] = useState<number>(() => {
     const d = new Date();
     d.setHours(0, 0, 0, 0);
     return d.getTime();
   });
+  const [viewMode, setViewMode] = useState<'daily' | 'player'>('daily');
 
   const players = useLiveQuery(() => db.players.toArray()) || [];
   const attendance = useLiveQuery(() => db.attendance.where('date').equals(selectedDate).toArray()) || [];
+  const allAttendance = useLiveQuery(() => db.attendance.toArray()) || [];
 
   const handleToggle = async (playerId: string) => {
     await AttendanceRepo.toggle(selectedDate, playerId);
   };
 
   const isPresent = (playerId: string) => attendance.some(a => a.player_id === playerId);
+
+  const changeDate = (days: number) => {
+    const newDate = new Date(selectedDate);
+    newDate.setDate(newDate.getDate() + days);
+    setSelectedDate(newDate.getTime());
+  };
+
+  const getPlayerWiseStats = () => {
+    const stats: Record<string, number> = {};
+    allAttendance.forEach(a => {
+      stats[a.player_id] = (stats[a.player_id] || 0) + 1;
+    });
+    return stats;
+  };
+
+  const playerStats = getPlayerWiseStats();
 
   const formattedDate = new Date(selectedDate).toLocaleDateString('en-IN', {
     day: 'numeric',
@@ -29,46 +47,93 @@ const Attendance: React.FC = () => {
 
   return (
     <div className="p-4 space-y-6 max-w-lg mx-auto safe-area-bottom pb-20 fade-in animate-in slide-in-from-bottom-2 duration-300">
-      <div className="flex justify-between items-start">
-        <div>
-          <h2 className="text-2xl font-black text-gray-900 dark:text-gray-50 flex items-center gap-2">
-            <Users className="text-primary-500" />
-            Attendance
-          </h2>
-          <p className="text-gray-500 dark:text-gray-400 mt-1">Track who is playing today.</p>
+      <div className="flex flex-col gap-4">
+        <div className="flex justify-between items-start">
+          <div>
+            <h2 className="text-2xl font-black text-gray-900 dark:text-gray-50 flex items-center gap-2">
+              <Users className="text-primary-500" />
+              Attendance
+            </h2>
+            <p className="text-gray-500 dark:text-gray-400 mt-1">Track who is playing today.</p>
+          </div>
+
+          <div className="flex bg-gray-100 dark:bg-gray-800 p-1 rounded-xl">
+            <button
+              onClick={() => setViewMode('daily')}
+              className={`p-2 rounded-lg transition-all ${viewMode === 'daily' ? 'bg-white dark:bg-gray-700 shadow-sm text-primary-600' : 'text-gray-400'}`}
+            >
+              <List size={18} />
+            </button>
+            <button
+              onClick={() => setViewMode('player')}
+              className={`p-2 rounded-lg transition-all ${viewMode === 'player' ? 'bg-white dark:bg-gray-700 shadow-sm text-primary-600' : 'text-gray-400'}`}
+            >
+              <LayoutGrid size={18} />
+            </button>
+          </div>
         </div>
-        <div className="bg-primary-50 dark:bg-primary-900/20 text-primary-600 dark:text-primary-400 px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 border border-primary-100 dark:border-primary-800">
-          <Calendar size={14} />
-          {formattedDate}
-        </div>
+
+        {viewMode === 'daily' && (
+          <div className="flex items-center justify-between bg-white dark:bg-gray-800 p-3 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm">
+            <button
+              onClick={() => changeDate(-1)}
+              className="p-2 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-xl transition-colors text-gray-500"
+            >
+              <ChevronLeft size={20} />
+            </button>
+            <div className="flex items-center gap-2 font-bold text-gray-900 dark:text-gray-50">
+              <Calendar size={18} className="text-primary-500" />
+              {formattedDate}
+            </div>
+            <button
+              onClick={() => changeDate(1)}
+              className="p-2 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-xl transition-colors text-gray-500"
+            >
+              <ChevronRight size={20} />
+            </button>
+          </div>
+        )}
       </div>
 
-      <Card className="p-4">
+      <Card className="p-4 overflow-hidden">
         <div className="space-y-2">
           {players.length === 0 ? (
             <div className="text-center py-8 text-gray-500">No players found. Add players in Home or Settings.</div>
-          ) : (
+          ) : viewMode === 'daily' ? (
             players.map(player => {
               const present = isPresent(player.id);
               return (
                 <button
                   key={player.id}
                   onClick={() => handleToggle(player.id)}
-                  className={`w-full flex items-center justify-between p-4 rounded-xl border transition-all ${
-                    present 
-                      ? 'bg-primary-50 dark:bg-primary-900/10 border-primary-200 dark:border-primary-800 text-primary-700 dark:text-primary-400' 
-                      : 'bg-white dark:bg-gray-800 border-gray-100 dark:border-gray-700 text-gray-700 dark:text-gray-200'
-                  }`}
+                  className={`w-full flex items-center justify-between p-4 rounded-xl border transition-all ${present
+                    ? 'bg-primary-50 dark:bg-primary-900/10 border-primary-200 dark:border-primary-800 text-primary-700 dark:text-primary-400 shadow-sm'
+                    : 'bg-white dark:bg-gray-800 border-gray-100 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:border-gray-200'
+                    }`}
                 >
                   <span className="font-bold">{player.name}</span>
                   {present ? (
-                    <CheckCircle2 size={24} className="text-primary-500" />
+                    <CheckCircle2 size={24} className="text-primary-500 animate-in zoom-in duration-200" />
                   ) : (
                     <Circle size={24} className="text-gray-300 dark:text-gray-600" />
                   )}
                 </button>
               );
             })
+          ) : (
+            <div className="divide-y divide-gray-100 dark:divide-gray-700">
+              {players.map(player => (
+                <div key={player.id} className="flex items-center justify-between py-4">
+                  <span className="font-bold text-gray-900 dark:text-gray-50">{player.name}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-gray-500 dark:text-gray-400">Total sessions:</span>
+                    <span className="bg-primary-50 dark:bg-primary-900/20 text-primary-600 dark:text-primary-400 px-2.5 py-1 rounded-lg text-sm font-black border border-primary-100 dark:border-primary-800">
+                      {playerStats[player.id] || 0}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
         </div>
       </Card>

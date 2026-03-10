@@ -5,42 +5,119 @@ import Button from '../components/Button';
 import { AlertTriangle, Database, Moon, Sun, Monitor, Palette } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useTheme } from '../contexts/ThemeContext';
+import { exportData, importData } from '../utils/dataUtils';
+import { Download, Upload } from 'lucide-react';
+import Modal from '../components/Modal';
+import { useToast } from '../components/Toast';
+import { APP_VERSION } from '../version';
 
 const Settings: React.FC = () => {
   const navigate = useNavigate();
   const { theme, setTheme } = useTheme();
+  const { showToast } = useToast();
+
+  const [modalConfig, setModalConfig] = React.useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    confirmLabel?: string;
+    onConfirm?: () => void;
+    type?: 'danger' | 'info' | 'success';
+  }>({
+    isOpen: false,
+    title: '',
+    message: ''
+  });
+
+  const closeModal = () => setModalConfig(prev => ({ ...prev, isOpen: false }));
 
   const handleClearData = async () => {
-    const confirmMessage = "⚠️ WARNING: This will permanently delete ALL matches, balls, and players from your device. This cannot be undone.\n\nType 'DELETE' to confirm.";
-    if (window.prompt(confirmMessage) === 'DELETE') {
-      try {
-        await db.transaction('rw', db.matches, db.innings, db.balls, db.players, async () => {
-          await db.matches.clear();
-          await db.innings.clear();
-          await db.balls.clear();
-          await db.players.clear();
-        });
-        alert('All data has been successfully cleared.');
-        navigate('/');
-      } catch (err) {
-        console.error(err);
-        alert('Failed to clear data.');
+    setModalConfig({
+      isOpen: true,
+      title: 'Clear All Data?',
+      message: 'This will permanently delete all matches, players, and attendance records. This action cannot be undone.',
+      confirmLabel: 'Delete Everything',
+      type: 'danger',
+      onConfirm: async () => {
+        try {
+          await db.transaction('rw', [db.matches, db.innings, db.balls, db.players, db.attendance], async () => {
+            await db.matches.clear();
+            await db.innings.clear();
+            await db.balls.clear();
+            await db.players.clear();
+            await db.attendance.clear();
+          });
+          showToast('All data has been cleared', 'success');
+          navigate('/');
+        } catch (err) {
+          console.error(err);
+          showToast('Failed to clear data', 'error');
+        }
       }
-    }
+    });
   };
 
   const handleSeedData = async () => {
-    if (window.confirm('This will replace ALL existing data with dummy players and matches. Continue?')) {
-      try {
-        const { seedDatabase } = await import('../utils/seedData');
-        await seedDatabase();
-        alert('Dummy data seeded successfully!');
-        window.location.href = '/'; // Force a full reload to ensure DB state is fresh
-      } catch (err) {
-        console.error(err);
-        alert('Failed to seed data: ' + (err instanceof Error ? err.message : String(err)));
+    setModalConfig({
+      isOpen: true,
+      title: 'Seed Dummy Data?',
+      message: 'This will replace all existing data with sample players and matches. Continue?',
+      confirmLabel: 'Seed Data',
+      type: 'info',
+      onConfirm: async () => {
+        try {
+          const { seedDatabase } = await import('../utils/seedData');
+          await seedDatabase();
+          showToast('Dummy data seeded successfully', 'success');
+          setTimeout(() => {
+            window.location.href = '/';
+          }, 1500);
+        } catch (err) {
+          console.error(err);
+          showToast('Failed to seed data', 'error');
+        }
       }
+    });
+  };
+
+  const handleExportData = async () => {
+    try {
+      await exportData();
+      showToast('Data exported successfully', 'success');
+    } catch (err) {
+      showToast('Failed to export data', 'error');
     }
+  };
+
+  const handleImportData = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const content = event.target?.result as string;
+      setModalConfig({
+        isOpen: true,
+        title: 'Import Data?',
+        message: 'This will replace ALL existing data with the imported data. Continue?',
+        confirmLabel: 'Import Now',
+        type: 'info',
+        onConfirm: async () => {
+          try {
+            await importData(content);
+            showToast('Data imported successfully', 'success');
+            setTimeout(() => {
+              window.location.href = '/';
+            }, 1500);
+          } catch (err) {
+            showToast('Import failed. Invalid file format', 'error');
+          }
+        }
+      });
+    };
+    reader.readAsText(file);
+    // Reset input so the same file can be selected again if needed
+    e.target.value = '';
   };
 
   return (
@@ -86,40 +163,89 @@ const Settings: React.FC = () => {
 
         <Card className="p-5 mb-4 bg-primary-50 dark:bg-primary-900/10 border-l-4 border-l-primary-500">
           <div className="flex gap-3 mb-4">
-             <div className="text-primary-500 mt-0.5">
-               <Database size={24} />
-             </div>
-             <div>
-               <h3 className="font-bold text-primary-900 dark:text-primary-100">Starter Data</h3>
-               <p className="text-sm text-primary-700 dark:text-primary-300 mt-1 leading-relaxed">
-                 Quickly populate the app with legendary players and a sample match to test all features.
-               </p>
-             </div>
+            <div className="text-primary-500 mt-0.5">
+              <Database size={24} />
+            </div>
+            <div>
+              <h3 className="font-bold text-primary-900 dark:text-primary-100">Starter Data</h3>
+              <p className="text-sm text-primary-700 dark:text-primary-300 mt-1 leading-relaxed">
+                Quickly populate the app with legendary players and a sample match to test all features.
+              </p>
+            </div>
           </div>
           <Button variant="primary" fullWidth onClick={handleSeedData}>
             Seed Dummy Data
           </Button>
         </Card>
 
+        <Card className="p-5 mb-4 bg-green-50 dark:bg-green-900/10 border-l-4 border-l-green-500">
+          <div className="flex gap-3 mb-4">
+            <div className="text-green-500 mt-0.5">
+              <Download size={24} />
+            </div>
+            <div>
+              <h3 className="font-bold text-green-900 dark:text-green-100">Backup & Restore</h3>
+              <p className="text-sm text-green-700 dark:text-green-300 mt-1 leading-relaxed">
+                Export your data to a JSON file or import a previously saved backup to restore your data.
+              </p>
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <Button variant="primary" fullWidth onClick={handleExportData} className="flex-1">
+              <Download size={18} className="mr-2 inline" />
+              Export
+            </Button>
+            <div className="flex-1 relative">
+              <input
+                type="file"
+                accept=".json"
+                onChange={handleImportData}
+                className="absolute inset-0 opacity-0 cursor-pointer w-full h-full z-10"
+                id="import-input"
+              />
+              <Button variant="outline" fullWidth className="w-full">
+                <Upload size={18} className="mr-2 inline" />
+                Import
+              </Button>
+            </div>
+          </div>
+        </Card>
+
         <Card className="p-5 border-l-4 border-l-red-500 bg-red-50 dark:bg-red-900/10 dark:border-l-red-600">
-        <div className="flex gap-3 mb-4">
-          <div className="text-red-500 mt-0.5">
-            <AlertTriangle size={24} />
+          <div className="flex gap-3 mb-4">
+            <div className="text-red-500 mt-0.5">
+              <AlertTriangle size={24} />
+            </div>
+            <div>
+              <h3 className="font-bold text-red-900">Danger Zone</h3>
+              <p className="text-sm text-red-700 mt-1 leading-relaxed">
+                Clearing data will wipe the entire Dexie IndexedDB cache. You will lose all your recorded match history, player profiles, and analytics.
+              </p>
+            </div>
           </div>
-          <div>
-            <h3 className="font-bold text-red-900">Danger Zone</h3>
-            <p className="text-sm text-red-700 mt-1 leading-relaxed">
-              Clearing data will wipe the entire Dexie IndexedDB cache. You will lose all your recorded match history, player profiles, and analytics.
-            </p>
-          </div>
-        </div>
-        
-        <Button variant="danger" fullWidth onClick={handleClearData}>
-          Clear All Data
-        </Button>
-      </Card>
-      
+
+          <Button variant="danger" fullWidth onClick={handleClearData}>
+            Clear All Data
+          </Button>
+        </Card>
+
       </div>
+
+      <div className="pt-6 pb-4 opacity-50 text-center space-y-1">
+        <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">CricSense Engine</p>
+        <p className="text-sm font-medium text-gray-400">Version {APP_VERSION}</p>
+        <p className="text-[10px] text-gray-400">© 2026 Morya Warriors</p>
+      </div>
+
+      <Modal
+        isOpen={modalConfig.isOpen}
+        onClose={closeModal}
+        title={modalConfig.title}
+        message={modalConfig.message}
+        confirmLabel={modalConfig.confirmLabel}
+        onConfirm={modalConfig.onConfirm}
+        type={modalConfig.type}
+      />
     </div>
   );
 };

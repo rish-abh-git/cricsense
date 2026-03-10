@@ -10,9 +10,9 @@ export class CricSenseDB extends Dexie {
 
   constructor() {
     super('CricSenseDatabase');
-    this.version(2).stores({
-      players: 'id, name',
-      matches: 'id, date, status',
+    this.version(3).stores({
+      players: 'id, name, is_morya_warrior',
+      matches: 'id, date, status, is_archived',
       innings: 'id, match_id, innings_number',
       balls: 'id, innings_id, [innings_id+over_number+ball_number], batsman_id, bowler_id',
       attendance: 'id, date, player_id'
