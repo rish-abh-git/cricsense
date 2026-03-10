@@ -21,8 +21,6 @@ const Home: React.FC = () => {
     const all = await db.players.toArray();
     return all.filter(p => p.is_morya_warrior).length;
   });
-  const allInnings = useLiveQuery(() => db.innings.toArray()) || [];
-  const allBalls = useLiveQuery(() => db.balls.toArray()) || [];
 
   const groupedMatches = React.useMemo(() => {
     if (!allMatches) return {};
