@@ -29,35 +29,39 @@ const Home: React.FC = () => {
     await shareText(text, `CricSense Summary - ${dateStr}`);
   };
 
+  const isViewOnly = window.location.search.includes('view=true');
+
   return (
     <div className="p-4 space-y-6">
       <section className="text-center py-6">
         <div className="w-20 h-20 bg-primary-100 rounded-full flex items-center justify-center mx-auto mb-4 mt-2 shadow-inner">
           <Trophy size={40} className="text-primary-600" />
         </div>
-        <h2 className="text-2xl font-bold text-gray-900">Welcome to CricSense</h2>
-        <p className="text-gray-500 mt-2 text-sm">Offline-first tennis cricket scorer</p>
+        <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-50">Welcome to CricSense</h2>
+        <p className="text-gray-500 dark:text-gray-400 mt-2 text-sm">Offline-first tennis cricket scorer</p>
       </section>
 
-      <div className="grid grid-cols-1 gap-4">
-        <Button 
-          onClick={() => navigate('/setup')} 
-          size="xl" 
-          className="w-full flex items-center justify-center gap-2"
-        >
-          <PlayCircle size={24} />
-          Start New Match
-        </Button>
-      </div>
+      {!isViewOnly && (
+        <div className="grid grid-cols-1 gap-4">
+          <Button 
+            onClick={() => navigate('/setup')} 
+            size="xl" 
+            className="w-full flex items-center justify-center gap-2"
+          >
+            <PlayCircle size={24} />
+            Start New Match
+          </Button>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-4">
-        <Card className="p-4 flex flex-col items-center justify-center text-center gap-2 cursor-pointer active:bg-gray-50" onClick={() => navigate('/analytics')}>
+        <Card className="p-4 flex flex-col items-center justify-center text-center gap-2 cursor-pointer active:bg-gray-50 dark:bg-gray-900" onClick={() => navigate('/analytics')}>
           <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center">
             <Users size={24} />
           </div>
           <div>
-            <p className="text-sm font-semibold text-gray-900">Players</p>
-            <p className="text-xs text-gray-500">{playersCount ?? 0} registered</p>
+            <p className="text-sm font-semibold text-gray-900 dark:text-gray-50">Players</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">{playersCount ?? 0} registered</p>
           </div>
         </Card>
 
@@ -66,8 +70,8 @@ const Home: React.FC = () => {
             <History size={24} />
           </div>
           <div>
-            <p className="text-sm font-semibold text-gray-900">Matches</p>
-            <p className="text-xs text-gray-500">{allMatches?.length ?? 0} played</p>
+            <p className="text-sm font-semibold text-gray-900 dark:text-gray-50">Matches</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">{allMatches?.length ?? 0} played</p>
           </div>
         </Card>
       </div>
@@ -75,7 +79,7 @@ const Home: React.FC = () => {
       {Object.entries(groupedMatches).map(([dateStr, matches]) => (
         <section key={dateStr} className="mb-6">
           <div className="flex items-center justify-between mb-3 mt-4 px-1">
-             <h3 className="font-bold text-gray-900 text-sm">{dateStr}</h3>
+             <h3 className="font-bold text-gray-900 dark:text-gray-50 text-sm">{dateStr}</h3>
              <button 
                onClick={() => handleShareDay(dateStr, matches)}
                className="text-primary-600 flex items-center gap-1.5 text-xs font-semibold bg-primary-50 px-3 py-1.5 rounded-full active:bg-primary-100"
@@ -85,7 +89,7 @@ const Home: React.FC = () => {
           </div>
           <div className="space-y-3">
             {matches.map(match => (
-              <Card key={match.id} className="p-4 active:bg-gray-50 cursor-pointer" onClick={() => navigate(`/summary/${match.id}`)}>
+              <Card key={match.id} className="p-4 active:bg-gray-50 dark:bg-gray-900 cursor-pointer" onClick={() => navigate(`/summary/${match.id}`)}>
                 <div className="flex justify-between items-center mb-2">
                   <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${match.status === 'completed' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
                     {match.status}

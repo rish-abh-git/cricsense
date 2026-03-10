@@ -4,7 +4,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../database/db';
 import Button from '../components/Button';
 import Card from '../components/Card';
-import { Share2, Home } from 'lucide-react';
+import { Share2, Home, MessageSquareQuote } from 'lucide-react';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -147,6 +147,36 @@ const MatchSummary: React.FC = () => {
     }
   };
 
+  const handleExportChatGPT = () => {
+    const chatGPTText = `Analyze this cricket match record from CricSense:\n\n` + 
+      `${summaryText}\n\n` +
+      `Match Context:\n` +
+      `- Played on: ${new Date(match.date).toLocaleDateString()}\n` +
+      `- Format: ${match.overs} overs gully cricket match\n\n` +
+      `Please provide a breakdown of player performances and key turning points.`;
+      
+    navigator.clipboard.writeText(chatGPTText).then(() => {
+      alert('Match data copied! You can now paste it into ChatGPT.');
+    });
+  };
+
+  const handleShareViewOnly = async () => {
+    const viewUrl = `${window.location.origin}${window.location.pathname}?view=true`;
+    const text = `Check out this match summary on CricSense:\n\n${summaryText}\n\nView details: ${viewUrl}`;
+    
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: 'CricSense View-Only Match', text });
+      } catch (err) {
+        console.error('Share failed', err);
+      }
+    } else {
+      navigator.clipboard.writeText(text).then(() => {
+        alert('View-only link copied to clipboard!');
+      });
+    }
+  };
+
   return (
     <div className="p-4 pb-24 max-w-lg mx-auto space-y-4">
       <Card className="p-5 text-center bg-gradient-to-br from-primary-600 to-primary-700 text-white border-0 shadow-lg shadow-primary-500/30">
@@ -165,18 +195,18 @@ const MatchSummary: React.FC = () => {
       </Card>
 
       <div className="grid grid-cols-2 gap-3">
-        <Card className="p-4 bg-white shadow-sm flex flex-col justify-center">
-          <p className="text-xs font-bold text-gray-500 uppercase mb-1 flex items-center gap-1">⭐ Top Scorer</p>
-          <p className="font-semibold text-gray-900">{topScorer}</p>
+        <Card className="p-4 bg-white dark:bg-gray-800 shadow-sm flex flex-col justify-center">
+          <p className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase mb-1 flex items-center gap-1">⭐ Top Scorer</p>
+          <p className="font-semibold text-gray-900 dark:text-gray-50">{topScorer}</p>
         </Card>
-        <Card className="p-4 bg-white shadow-sm flex flex-col justify-center">
-          <p className="text-xs font-bold text-gray-500 uppercase mb-1 flex items-center gap-1">🎯 Best Bowler</p>
-          <p className="font-semibold text-gray-900">{bestBowler}</p>
+        <Card className="p-4 bg-white dark:bg-gray-800 shadow-sm flex flex-col justify-center">
+          <p className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase mb-1 flex items-center gap-1">🎯 Best Bowler</p>
+          <p className="font-semibold text-gray-900 dark:text-gray-50">{bestBowler}</p>
         </Card>
       </div>
 
-      <Card className="p-4 bg-white shadow-sm">
-        <h3 className="font-bold text-gray-900 mb-4">Runs per Over</h3>
+      <Card className="p-4 bg-white dark:bg-gray-800 shadow-sm">
+        <h3 className="font-bold text-gray-900 dark:text-gray-50 mb-4">Runs per Over</h3>
         <div className="h-48">
           {chartData && (
             <Bar 
@@ -187,23 +217,35 @@ const MatchSummary: React.FC = () => {
         </div>
       </Card>
 
-      <Card className="p-4 bg-white shadow-sm grid grid-cols-2 gap-4">
-        <div className="text-center p-3 bg-gray-50 rounded-xl">
-          <p className="text-xs font-bold text-gray-500 uppercase mb-1">Dot Balls</p>
-          <p className="text-2xl font-black text-gray-800">{stats?.dotPct}%</p>
+      <Card className="p-4 bg-white dark:bg-gray-800 shadow-sm grid grid-cols-2 gap-4">
+        <div className="text-center p-3 bg-gray-50 dark:bg-gray-900 rounded-xl">
+          <p className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase mb-1">Dot Balls</p>
+          <p className="text-2xl font-black text-gray-800 dark:text-gray-100">{stats?.dotPct}%</p>
         </div>
-        <div className="text-center p-3 bg-gray-50 rounded-xl">
-           <p className="text-xs font-bold text-gray-500 uppercase mb-1">Boundaries</p>
+        <div className="text-center p-3 bg-gray-50 dark:bg-gray-900 rounded-xl">
+           <p className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase mb-1">Boundaries</p>
            <p className="text-2xl font-black text-primary-600">{stats?.bndPct}%</p>
         </div>
       </Card>
 
-      <div className="grid grid-cols-2 gap-3 mt-8">
-        <Button variant="secondary" onClick={() => navigate('/')} className="flex gap-2.5">
-          <Home size={18} /> Home
+      <div className="grid grid-cols-1 gap-3">
+        <Button variant="outline" onClick={handleExportChatGPT} className="flex gap-2.5 bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
+          <MessageSquareQuote size={18} className="text-primary-600" /> Copy for ChatGPT Analysis
+        </Button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 mt-4">
+        <Button variant="outline" onClick={handleShareViewOnly} className="flex gap-2.5">
+          <Share2 size={18} className="text-primary-500" /> Share View-Only
         </Button>
         <Button variant="primary" onClick={handleShare} className="flex gap-2.5 shadow-md shadow-primary-500/20">
-          <Share2 size={18} /> Share
+          <Share2 size={18} /> Share Results
+        </Button>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 mt-2">
+        <Button variant="secondary" onClick={() => navigate('/')} className="flex gap-2.5">
+          <Home size={18} /> Back to Home
         </Button>
       </div>
     </div>

@@ -80,7 +80,7 @@ const MatchSetup: React.FC = () => {
 
   return (
     <div className="p-4 safe-area-bottom pb-20">
-      <h2 className="text-xl font-bold text-gray-900 mb-4">Match Setup</h2>
+      <h2 className="text-xl font-bold text-gray-900 dark:text-gray-50 mb-4">Match Setup</h2>
       
       <div className="space-y-4 mb-6">
         <div className="grid grid-cols-2 gap-3">
@@ -107,23 +107,23 @@ const MatchSetup: React.FC = () => {
         />
       </div>
 
-      <div className="flex gap-2 mb-4 bg-gray-200 p-1 rounded-xl">
+      <div className="flex gap-2 mb-4 bg-gray-200 dark:bg-gray-700 p-1 rounded-xl">
         <button 
-          className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-colors ${activeTeamSelection === 'A' ? 'bg-white shadow-sm text-primary-600' : 'text-gray-500'}`}
+          className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-colors ${activeTeamSelection === 'A' ? 'bg-white dark:bg-gray-800 shadow-sm text-primary-600' : 'text-gray-500 dark:text-gray-400'}`}
           onClick={() => setActiveTeamSelection('A')}
         >
           {teamAName} ({teamAPlayers.length})
         </button>
         <button 
-          className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-colors ${activeTeamSelection === 'B' ? 'bg-white shadow-sm text-primary-600' : 'text-gray-500'}`}
+          className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-colors ${activeTeamSelection === 'B' ? 'bg-white dark:bg-gray-800 shadow-sm text-primary-600' : 'text-gray-500 dark:text-gray-400'}`}
           onClick={() => setActiveTeamSelection('B')}
         >
           {teamBName} ({teamBPlayers.length})
         </button>
       </div>
 
-      <Card className="p-3 mb-6 bg-white border border-gray-200">
-        <label className="text-sm font-medium text-gray-700 mb-2 block">Add Players to {activeTeamSelection === 'A' ? teamAName : teamBName}</label>
+      <Card className="p-3 mb-6 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
+        <label className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-2 block">Add Players to {activeTeamSelection === 'A' ? teamAName : teamBName}</label>
         <div className="flex gap-2 mb-3">
           <div className="relative flex-1">
              <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -132,7 +132,7 @@ const MatchSetup: React.FC = () => {
                placeholder="Search or create player"
                value={searchQuery}
                onChange={e => setSearchQuery(e.target.value)}
-               className="w-full pl-9 pr-3 py-2 bg-gray-50 border border-gray-200 rounded-lg outline-none focus:border-primary-500"
+               className="w-full pl-9 pr-3 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg outline-none focus:border-primary-500"
                onKeyDown={e => e.key === 'Enter' && handleAddPlayer()}
              />
           </div>
@@ -142,12 +142,12 @@ const MatchSetup: React.FC = () => {
         </div>
         
         {searchQuery.trim() && filteredPlayers.length > 0 && (
-          <div className="flex gap-2 flex-wrap mb-4 bg-gray-50 p-2 rounded-lg border border-gray-200">
+          <div className="flex gap-2 flex-wrap mb-4 bg-gray-50 dark:bg-gray-900 p-2 rounded-lg border border-gray-200 dark:border-gray-700">
             {filteredPlayers.slice(0, 5).map(p => (
               <button 
                 key={p.id} 
                 onClick={() => handleSelectExisting(p)}
-                className="px-3 py-1 bg-white border border-gray-300 rounded-full text-sm hover:border-primary-500 hover:text-primary-600 transition-colors"
+                className="px-3 py-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-full text-sm hover:border-primary-500 hover:text-primary-600 transition-colors"
               >
                 {p.name}
               </button>
@@ -156,7 +156,7 @@ const MatchSetup: React.FC = () => {
         )}
 
         <div className="min-h-[100px]">
-          <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">Selected Players</h4>
+          <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mb-2">Selected Players</h4>
           <div className="flex flex-wrap gap-2">
             {(activeTeamSelection === 'A' ? teamAPlayers : teamBPlayers).map(p => (
               <div key={p.id} className="flex items-center gap-1 bg-primary-50 text-primary-700 px-3 py-1.5 rounded-full text-sm font-medium border border-primary-100">

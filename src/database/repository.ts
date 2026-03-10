@@ -115,3 +115,16 @@ export const BallRepo = {
     await db.balls.delete(lastBall.id);
   }
 };
+
+export const AttendanceRepo = {
+  getAll: () => db.attendance.toArray(),
+  getByDate: (date: number) => db.attendance.where('date').equals(date).toArray(),
+  toggle: async (date: number, player_id: string) => {
+    const existing = await db.attendance.where({ date, player_id }).first();
+    if (existing) {
+      await db.attendance.delete(existing.id);
+    } else {
+      await db.attendance.add({ id: uuidv4(), date, player_id });
+    }
+  }
+};

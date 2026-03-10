@@ -35,6 +35,12 @@ export interface Innings {
   bowler_id?: string;
 }
 
+export interface Attendance {
+  id: string;
+  date: number;
+  player_id: string;
+}
+
 export interface Ball {
   id: string;
   innings_id: string;
@@ -42,6 +48,7 @@ export interface Ball {
   ball_number: number;
   batsman_id: string;
   bowler_id: string;
+  fielder_id?: string; // Captured for catches/runouts
   runs: number;
   extra_type: ExtraType;
   extra_runs: number;

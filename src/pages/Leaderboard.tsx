@@ -2,22 +2,30 @@ import React, { useMemo, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../database/db';
 import Card from '../components/Card';
-import { Medal, Trophy, Activity, Share2 } from 'lucide-react';
-import Button from '../components/Button';
+import { Medal, Trophy, Share2 } from 'lucide-react';
 
 const Leaderboard: React.FC = () => {
-  const [tab, setTab] = useState<'batsmen' | 'bowlers'>('batsmen');
+  const [tab, setTab] = useState<'gully' | 'batsmen' | 'bowlers'>('gully');
 
   const players = useLiveQuery(() => db.players.toArray()) || [];
   const balls = useLiveQuery(() => db.balls.toArray()) || [];
   
   const rankings = useMemo(() => {
-    if (!players.length || !balls.length) return { topBatsmen: [], topBowlers: [] };
+    if (!players.length || !balls.length) return { topGully: [], topBatsmen: [], topBowlers: [] };
 
-    const statsMap = new Map<string, { runs: number, wickets: number, ballsFaced: number, legalBallsBowled: number, runsGiven: number }>();
+    const statsMap = new Map<string, { 
+      runs: number, 
+      wickets: number, 
+      ballsFaced: number, 
+      legalBallsBowled: number, 
+      runsGiven: number,
+      catches: number,
+      runouts: number,
+      dotsFaced: number
+    }>();
     
     players.forEach(p => {
-      statsMap.set(p.id, { runs: 0, wickets: 0, ballsFaced: 0, legalBallsBowled: 0, runsGiven: 0 });
+      statsMap.set(p.id, { runs: 0, wickets: 0, ballsFaced: 0, legalBallsBowled: 0, runsGiven: 0, catches: 0, runouts: 0, dotsFaced: 0 });
     });
 
     balls.forEach(b => {
@@ -26,6 +34,7 @@ const Leaderboard: React.FC = () => {
       if (batStat) {
          batStat.runs += b.runs;
          if (b.extra_type !== 'wide') batStat.ballsFaced += 1;
+         if (b.runs === 0 && !b.is_wicket && b.extra_type === 'none') batStat.dotsFaced += 1;
       }
 
       // Bowling stats
@@ -35,7 +44,22 @@ const Leaderboard: React.FC = () => {
          if (b.is_wicket && b.wicket_type !== 'run_out') bowlStat.wickets += 1;
          if (b.extra_type !== 'wide' && b.extra_type !== 'no_ball') bowlStat.legalBallsBowled += 1;
       }
+
+      // Fielding stats
+      if (b.fielder_id) {
+        const fieldStat = statsMap.get(b.fielder_id);
+        if (fieldStat) {
+          if (b.wicket_type === 'caught' || b.wicket_type === 'stumped') fieldStat.catches += 1;
+          if (b.wicket_type === 'run_out') fieldStat.runouts += 1;
+        }
+      }
     });
+
+    const topGully = players.map(p => {
+      const s = statsMap.get(p.id)!;
+      const score = s.runs + (20 * s.wickets) + (10 * s.catches) + (10 * s.runouts) - s.dotsFaced;
+      return { id: p.id, name: p.name, score };
+    }).sort((a, b) => b.score - a.score).slice(0, 10);
 
     const topBatsmen = players.map(p => {
       const s = statsMap.get(p.id)!;
@@ -58,7 +82,7 @@ const Leaderboard: React.FC = () => {
       };
     }).filter(p => p.wickets > 0 || parseFloat(p.eco) > 0).sort((a, b) => b.wickets - a.wickets).slice(0, 10);
 
-    return { topBatsmen, topBowlers };
+    return { topGully, topBatsmen, topBowlers };
   }, [players, balls]);
 
   const handleShare = async () => {
@@ -92,11 +116,11 @@ const Leaderboard: React.FC = () => {
     <div className="p-4 space-y-6 max-w-lg mx-auto safe-area-bottom pb-20 animate-in fade-in slide-in-from-bottom-2 duration-300">
       <div className="flex justify-between items-start">
         <div>
-          <h2 className="text-2xl font-black text-gray-900 flex items-center gap-2">
+          <h2 className="text-2xl font-black text-gray-900 dark:text-gray-50 flex items-center gap-2">
             <Medal className="text-amber-500" />
             Leaderboard
           </h2>
-          <p className="text-gray-500 mt-1">Top performers across all matches.</p>
+          <p className="text-gray-500 dark:text-gray-400 mt-1">Top performers across all matches.</p>
         </div>
         <button 
           onClick={handleShare}
@@ -107,33 +131,60 @@ const Leaderboard: React.FC = () => {
         </button>
       </div>
 
-      <div className="flex bg-gray-200 p-1 rounded-xl">
+      <div className="flex bg-gray-200 dark:bg-gray-700 p-1 rounded-xl">
         <button 
-          className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${tab === 'batsmen' ? 'bg-white text-primary-600 shadow-sm' : 'text-gray-500'}`}
-          onClick={() => setTab('batsmen')}
+          className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${tab === 'gully' ? 'bg-white dark:bg-gray-800 text-primary-600 shadow-sm' : 'text-gray-500 dark:text-gray-400'}`}
+          onClick={() => setTab('gully')}
         >
-          Top Batsmen
+          Gully Score
         </button>
         <button 
-          className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${tab === 'bowlers' ? 'bg-white text-primary-600 shadow-sm' : 'text-gray-500'}`}
+          className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${tab === 'batsmen' ? 'bg-white dark:bg-gray-800 text-primary-600 shadow-sm' : 'text-gray-500 dark:text-gray-400'}`}
+          onClick={() => setTab('batsmen')}
+        >
+          Batsmen
+        </button>
+        <button 
+          className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${tab === 'bowlers' ? 'bg-white dark:bg-gray-800 text-primary-600 shadow-sm' : 'text-gray-500 dark:text-gray-400'}`}
           onClick={() => setTab('bowlers')}
         >
-          Top Bowlers
+          Bowlers
         </button>
       </div>
 
       <div className="space-y-3">
-        {tab === 'batsmen' ? (
+        {tab === 'gully' ? (
+          rankings.topGully.length > 0 ? (
+            rankings.topGully.map((p, idx) => (
+              <Card key={p.id} className="p-4 flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold overflow-hidden ${idx === 0 ? 'bg-amber-100 text-amber-600' : idx === 1 ? 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300' : idx === 2 ? 'bg-orange-100 text-orange-600' : 'bg-gray-100 dark:bg-gray-800 text-gray-400'}`}>
+                    {idx === 0 ? <Trophy size={16} /> : idx + 1}
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-gray-900 dark:text-gray-50">{p.name}</h3>
+                    <p className="text-[10px] text-gray-500 dark:text-gray-400 font-bold uppercase tracking-widest mt-0.5">Overall Rank</p>
+                  </div>
+                </div>
+                <div className="text-xl font-black text-primary-600 bg-primary-50 dark:bg-primary-900/20 px-3 py-1 rounded-lg">
+                  {p.score}
+                </div>
+              </Card>
+            ))
+          ) : (
+            <div className="text-center p-8 text-gray-400">No scoring data available yet.</div>
+          )
+        ) : tab === 'batsmen' ? (
           rankings.topBatsmen.length > 0 ? (
             rankings.topBatsmen.map((p, idx) => (
               <Card key={p.id} className="p-4 flex items-center justify-between">
                 <div className="flex items-center gap-4">
-                  <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold overflow-hidden ${idx === 0 ? 'bg-amber-100 text-amber-600' : idx === 1 ? 'bg-gray-200 text-gray-600' : idx === 2 ? 'bg-orange-100 text-orange-600' : 'bg-gray-100 text-gray-400'}`}>
-                    {idx === 0 ? <Trophy size={16} /> : idx + 1}
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold overflow-hidden ${idx === 0 ? 'bg-amber-100 text-amber-600' : idx === 1 ? 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300' : idx === 2 ? 'bg-orange-100 text-orange-600' : 'bg-gray-100 dark:bg-gray-800 text-gray-400'}`}>
+                    {idx + 1}
                   </div>
                   <div>
-                    <h3 className="font-bold text-gray-900">{p.name}</h3>
-                    <p className="text-xs text-gray-500 font-medium tracking-wide mt-0.5">SR: {p.sr}</p>
+                    <h3 className="font-bold text-gray-900 dark:text-gray-50">{p.name}</h3>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 font-medium tracking-wide mt-0.5">SR: {p.sr}</p>
                   </div>
                 </div>
                 <div className="text-xl font-black text-primary-600">
@@ -149,12 +200,12 @@ const Leaderboard: React.FC = () => {
             rankings.topBowlers.map((p, idx) => (
               <Card key={p.id} className="p-4 flex items-center justify-between">
                 <div className="flex items-center gap-4">
-                  <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold overflow-hidden ${idx === 0 ? 'bg-amber-100 text-amber-600' : idx === 1 ? 'bg-gray-200 text-gray-600' : idx === 2 ? 'bg-orange-100 text-orange-600' : 'bg-gray-100 text-gray-400'}`}>
-                    {idx === 0 ? <Trophy size={16} /> : idx + 1}
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold overflow-hidden ${idx === 0 ? 'bg-amber-100 text-amber-600' : idx === 1 ? 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300' : idx === 2 ? 'bg-orange-100 text-orange-600' : 'bg-gray-100 dark:bg-gray-800 text-gray-400'}`}>
+                    {idx + 1}
                   </div>
                   <div>
-                    <h3 className="font-bold text-gray-900">{p.name}</h3>
-                    <p className="text-xs text-gray-500 font-medium tracking-wide mt-0.5">ECO: {p.eco}</p>
+                    <h3 className="font-bold text-gray-900 dark:text-gray-50">{p.name}</h3>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 font-medium tracking-wide mt-0.5">ECO: {p.eco}</p>
                   </div>
                 </div>
                 <div className="text-xl font-black text-rose-500">
