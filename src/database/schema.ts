@@ -20,6 +20,9 @@ export interface Match {
   tossWinner?: string;
   optedTo?: 'bat' | 'bowl';
   is_archived?: boolean;
+  batting_first?: string;
+  first_innings_total?: number;
+  match_attendance?: string[]; // player IDs present for this match
 }
 
 export interface Innings {
@@ -50,11 +53,16 @@ export interface Ball {
   ball_number: number;
   batsman_id: string;
   bowler_id: string;
-  fielder_id?: string; // Captured for catches/runouts
+  fielder_id?: string;
   runs: number;
   extra_type: ExtraType;
   extra_runs: number;
   is_wicket: boolean;
   wicket_type: WicketType;
   player_out_id?: string;
+  timestamp?: number;
+  // Snapshot of innings state BEFORE this ball was bowled (for undo)
+  snapshot_striker_id?: string;
+  snapshot_non_striker_id?: string;
+  snapshot_bowler_id?: string;
 }

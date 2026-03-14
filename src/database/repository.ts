@@ -19,7 +19,7 @@ export const PlayerRepo = {
 export const MatchRepo = {
   getAll: () => db.matches.orderBy('date').reverse().toArray(),
   getById: (id: string) => db.matches.get(id),
-  create: async (teamA: string, teamB: string, teamAPlayers: string[], teamBPlayers: string[], overs: number) => {
+  create: async (teamA: string, teamB: string, teamAPlayers: string[], teamBPlayers: string[], overs: number, battingFirst?: string, matchAttendance?: string[]) => {
     const mId = uuidv4();
     await db.matches.add({
       id: mId,
@@ -30,6 +30,8 @@ export const MatchRepo = {
       teamBPlayers,
       overs,
       status: 'ongoing',
+      batting_first: battingFirst,
+      match_attendance: matchAttendance,
     });
     return mId;
   },
@@ -80,8 +82,17 @@ export const InningsRepo = {
 export const BallRepo = {
   getByInnings: (inningsId: string) => db.balls.where('innings_id').equals(inningsId).toArray(),
   add: async (ball: Omit<Ball, 'id'>) => {
+    // Capture snapshot of current innings state before this ball
+    const innings = await db.innings.get(ball.innings_id);
     const id = uuidv4();
-    await db.balls.add({ ...ball, id });
+    await db.balls.add({
+      ...ball,
+      id,
+      timestamp: Date.now(),
+      snapshot_striker_id: innings?.striker_id,
+      snapshot_non_striker_id: innings?.non_striker_id,
+      snapshot_bowler_id: innings?.bowler_id,
+    });
     const isLegal = ball.extra_type !== 'wide' && ball.extra_type !== 'no_ball';
     await InningsRepo.updateScore(ball.innings_id, ball.runs + ball.extra_runs, ball.is_wicket, isLegal);
     return id;
@@ -90,15 +101,16 @@ export const BallRepo = {
     const balls = await db.balls.where('innings_id').equals(inningsId).toArray();
     if (balls.length === 0) return;
     
-    // get last ball by sorting with over_number and ball_number
+    // Sort by timestamp (fallback to over/ball number for legacy data)
     balls.sort((a, b) => {
+      if (a.timestamp && b.timestamp) return a.timestamp - b.timestamp;
       if (a.over_number !== b.over_number) return a.over_number - b.over_number;
       return a.ball_number - b.ball_number;
     });
     
     const lastBall = balls[balls.length - 1];
     
-    // Logic to revert innings score
+    // Revert innings score
     const innings = await db.innings.get(inningsId);
     if (innings) {
       const isLegal = lastBall.extra_type !== 'wide' && lastBall.extra_type !== 'no_ball';
@@ -108,11 +120,70 @@ export const BallRepo = {
         runs: Math.max(0, innings.runs - (lastBall.runs + lastBall.extra_runs)),
         wickets: Math.max(0, innings.wickets - (lastBall.is_wicket ? 1 : 0)),
         balls_bowled: newBallsBowled,
-        overs: Math.floor(newBallsBowled / 6) + (newBallsBowled % 6) / 10
+        overs: Math.floor(newBallsBowled / 6) + (newBallsBowled % 6) / 10,
+        // Restore striker/non-striker/bowler from this ball's snapshot
+        striker_id: lastBall.snapshot_striker_id,
+        non_striker_id: lastBall.snapshot_non_striker_id,
+        bowler_id: lastBall.snapshot_bowler_id,
       });
     }
     
     await db.balls.delete(lastBall.id);
+  },
+  revertToBall: async (inningsId: string, targetBallId: string) => {
+    const balls = await db.balls.where('innings_id').equals(inningsId).toArray();
+    if (balls.length === 0) return;
+
+    // Sort by timestamp (fallback to over/ball number)
+    balls.sort((a, b) => {
+      if (a.timestamp && b.timestamp) return a.timestamp - b.timestamp;
+      if (a.over_number !== b.over_number) return a.over_number - b.over_number;
+      return a.ball_number - b.ball_number;
+    });
+
+    const targetIndex = balls.findIndex(b => b.id === targetBallId);
+    if (targetIndex < 0) return;
+
+    // Get all balls AFTER the target ball
+    const ballsToDelete = balls.slice(targetIndex + 1);
+    if (ballsToDelete.length === 0) return;
+
+    // Calculate runs, wickets, legal balls to subtract
+    let runsToSubtract = 0;
+    let wicketsToSubtract = 0;
+    let legalBallsToSubtract = 0;
+
+    for (const b of ballsToDelete) {
+      runsToSubtract += b.runs + b.extra_runs;
+      if (b.is_wicket) wicketsToSubtract++;
+      if (b.extra_type !== 'wide' && b.extra_type !== 'no_ball') legalBallsToSubtract++;
+    }
+
+    const innings = await db.innings.get(inningsId);
+    if (innings) {
+      const newBallsBowled = Math.max(0, innings.balls_bowled - legalBallsToSubtract);
+
+      // We need to figure out what the innings state should be AFTER the target ball
+      // The target ball's snapshot is the state BEFORE the target ball was bowled.
+      // We need the state AFTER the target ball, which is what was set by handleScoreBall.
+      // The easiest approach: the ball AFTER the target has the snapshot of state after target ball.
+      // But if we're reverting TO the target ball, the first deleted ball's snapshot IS the correct state after the target ball.
+      const firstDeletedBall = ballsToDelete[0];
+
+      await db.innings.update(inningsId, {
+        runs: Math.max(0, innings.runs - runsToSubtract),
+        wickets: Math.max(0, innings.wickets - wicketsToSubtract),
+        balls_bowled: newBallsBowled,
+        overs: Math.floor(newBallsBowled / 6) + (newBallsBowled % 6) / 10,
+        // Use the first deleted ball's snapshot — that's the state right after the target ball
+        striker_id: firstDeletedBall.snapshot_striker_id,
+        non_striker_id: firstDeletedBall.snapshot_non_striker_id,
+        bowler_id: firstDeletedBall.snapshot_bowler_id,
+      });
+    }
+
+    // Delete all balls after target
+    await db.balls.bulkDelete(ballsToDelete.map(b => b.id));
   }
 };
 
@@ -128,3 +199,4 @@ export const AttendanceRepo = {
     }
   }
 };
+

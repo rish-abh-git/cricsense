@@ -17,6 +17,13 @@ export class CricSenseDB extends Dexie {
       balls: 'id, innings_id, [innings_id+over_number+ball_number], batsman_id, bowler_id',
       attendance: 'id, date, player_id'
     });
+    this.version(4).stores({
+      players: 'id, name, is_morya_warrior',
+      matches: 'id, date, status, is_archived',
+      innings: 'id, match_id, innings_number',
+      balls: 'id, innings_id, [innings_id+over_number+ball_number], batsman_id, bowler_id, timestamp',
+      attendance: 'id, date, player_id'
+    });
   }
 }
 
