@@ -1,12 +1,14 @@
 import React from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { Trophy, Home, BarChart2, ArrowLeft, Settings as SettingsIcon, Medal, Sun, Moon, Users, ArrowRightLeft } from 'lucide-react';
+import { Trophy, Home, BarChart2, ArrowLeft, Settings as SettingsIcon, Medal, Sun, Moon, Users, ArrowRightLeft, LogOut, ShieldAlert } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
+import { useAuth } from '../contexts/AuthContext';
 
 const Layout: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { setTheme, isDark } = useTheme();
+  const { isAdmin, logout } = useAuth();
 
   const isHome = location.pathname === '/';
   const isViewOnly = location.search.includes('view=true');
@@ -29,13 +31,23 @@ const Layout: React.FC = () => {
             CricSense
           </h1>
         </div>
-        <button
-          onClick={() => setTheme(isDark ? 'light' : 'dark')}
-          className="p-2 -mr-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors active:bg-gray-200 dark:active:bg-gray-600"
-          aria-label="Toggle dark mode"
-        >
-          {isDark ? <Sun size={20} /> : <Moon size={20} />}
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setTheme(isDark ? 'light' : 'dark')}
+            className="p-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors active:bg-gray-200 dark:active:bg-gray-600"
+            aria-label="Toggle dark mode"
+          >
+            {isDark ? <Sun size={20} /> : <Moon size={20} />}
+          </button>
+          
+          <button
+            onClick={() => isAdmin ? logout() : navigate('/login')}
+            className={`p-2 rounded-full transition-colors active:bg-gray-200 dark:active:bg-gray-600 ${isAdmin ? 'text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20' : 'text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-900/20'}`}
+            title={isAdmin ? 'Logout Admin' : 'Admin Login'}
+          >
+            {isAdmin ? <LogOut size={20} /> : <ShieldAlert size={20} />}
+          </button>
+        </div>
       </header>
     )}
 
@@ -53,12 +65,14 @@ const Layout: React.FC = () => {
           isActive={isHome}
           onClick={() => navigate('/')} 
         />
-        <NavItem 
-          icon={<Trophy size={24} />} 
-          label="New Match" 
-          isActive={location.pathname === '/setup'}
-          onClick={() => navigate('/setup')} 
-        />
+        {isAdmin && (
+          <NavItem 
+            icon={<Trophy size={24} />} 
+            label="New Match" 
+            isActive={location.pathname === '/setup'}
+            onClick={() => navigate('/setup')} 
+          />
+        )}
         <NavItem 
           icon={<BarChart2 size={24} />} 
           label="Analytics" 
@@ -71,24 +85,28 @@ const Layout: React.FC = () => {
           isActive={location.pathname === '/leaderboard'}
           onClick={() => navigate('/leaderboard')} 
         />
-        <NavItem 
-          icon={<Users size={24} />} 
-          label="Attendance" 
-          isActive={location.pathname === '/attendance'}
-          onClick={() => navigate('/attendance')} 
-        />
+        {isAdmin && (
+          <NavItem 
+            icon={<Users size={24} />} 
+            label="Attendance" 
+            isActive={location.pathname === '/attendance'}
+            onClick={() => navigate('/attendance')} 
+          />
+        )}
         <NavItem 
           icon={<ArrowRightLeft size={24} />} 
           label="Compare" 
           isActive={location.pathname === '/compare'}
           onClick={() => navigate('/compare')} 
         />
-        <NavItem 
-          icon={<SettingsIcon size={24} />} 
-          label="Settings" 
-          isActive={location.pathname === '/settings'}
-          onClick={() => navigate('/settings')} 
-        />
+        {isAdmin && (
+          <NavItem 
+            icon={<SettingsIcon size={24} />} 
+            label="Settings" 
+            isActive={location.pathname === '/settings'}
+            onClick={() => navigate('/settings')} 
+          />
+        )}
       </nav>
       )}
     </div>

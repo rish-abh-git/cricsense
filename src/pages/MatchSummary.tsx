@@ -8,6 +8,7 @@ import { Share2, Home, MessageSquareQuote, Trash2 } from 'lucide-react';
 import { generateBallWiseSummary } from '../utils/shareUtils';
 import { useToast } from '../components/Toast';
 import Modal from '../components/Modal';
+import type { Ball } from '../database/schema';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -59,8 +60,8 @@ const MatchSummary: React.FC = () => {
     }
 
     // Top Scorer
-    const batsmanStats = new Map<string, { runs: number, balls: number }>();
-    const bowlerStats = new Map<string, { wickets: number, runs: number }>();
+    const batsmanStats = new Map<string, { runs: number, balls: number, fours: number, sixes: number }>();
+    const bowlerStats = new Map<string, { wickets: number, runs: number, legalBalls: number, dots: number }>();
     let totalDots = 0;
     let totalBoundaries = 0;
     let totalLegalBalls = 0;
@@ -69,16 +70,22 @@ const MatchSummary: React.FC = () => {
 
     mBalls.forEach(b => {
       // Batter stats
-      const bStat = batsmanStats.get(b.batsman_id) || { runs: 0, balls: 0 };
+      const bStat = batsmanStats.get(b.batsman_id) || { runs: 0, balls: 0, fours: 0, sixes: 0 };
       bStat.runs += b.runs;
       if (b.extra_type !== 'wide') bStat.balls += 1;
+      if (b.runs === 4) bStat.fours += 1;
+      if (b.runs === 6) bStat.sixes += 1;
       batsmanStats.set(b.batsman_id, bStat);
 
       // Bowler stats
-      const blStat = bowlerStats.get(b.bowler_id) || { wickets: 0, runs: 0 };
-      blStat.runs += b.runs + b.extra_runs;
-      if (b.is_wicket && b.wicket_type !== 'run_out') blStat.wickets += 1;
-      bowlerStats.set(b.bowler_id, blStat);
+      if (b.bowler_id) {
+         const blStat = bowlerStats.get(b.bowler_id) || { wickets: 0, runs: 0, legalBalls: 0, dots: 0 };
+         blStat.runs += b.runs + b.extra_runs;
+         if (b.is_wicket && b.wicket_type !== 'run_out') blStat.wickets += 1;
+         if (b.extra_type !== 'wide' && b.extra_type !== 'no_ball') blStat.legalBalls += 1;
+         if (b.runs === 0 && !b.is_wicket && b.extra_type === 'none') blStat.dots += 1;
+         bowlerStats.set(b.bowler_id, blStat);
+      }
 
       // Team analytics
       if (b.extra_type !== 'wide' && b.extra_type !== 'no_ball') totalLegalBalls++;
@@ -107,13 +114,13 @@ const MatchSummary: React.FC = () => {
     const team2Data = new Array(match.overs).fill(0);
 
     if (i1) {
-      mBalls.filter(b => b.innings_id === i1.id && b.over_number <= match.overs).forEach(b => {
-        team1Data[b.over_number - 1] += (b.runs + b.extra_runs);
+      mBalls.filter(b => b.innings_id === i1.id && b.over_number < match.overs).forEach(b => {
+        team1Data[b.over_number] += (b.runs + b.extra_runs);
       });
     }
     if (i2) {
-      mBalls.filter(b => b.innings_id === i2.id && b.over_number <= match.overs).forEach(b => {
-        team2Data[b.over_number - 1] += (b.runs + b.extra_runs);
+      mBalls.filter(b => b.innings_id === i2.id && b.over_number < match.overs).forEach(b => {
+        team2Data[b.over_number] += (b.runs + b.extra_runs);
       });
     }
 
@@ -125,15 +132,30 @@ const MatchSummary: React.FC = () => {
       ]
     };
 
-    const sText = `🏆 Match Result\n\n` +
+    let sText = `🏆 Match Result\n\n` +
       `${i1?.batting_team}: ${i1?.runs}/${i1?.wickets} (${i1?.overs.toFixed(1)} ov)\n` +
       `${i2 ? `${i2.batting_team}: ${i2.runs}/${i2.wickets} (${i2.overs.toFixed(1)} ov)\n` : ''}\n` +
-      `${winner}\n\n` +
-      `⭐ Top Scorer: ${tsPlayer?.name || '-'} ${topSm.runs} (${topSm.balls})\n` +
-      `🎯 Best Bowler: ${bbPlayer?.name || '-'} ${bestBm.wickets}/${bestBm.runs}\n\n` +
-      `📊 Team Analytics:\n` +
-      `Dot Balls: ${Math.round((totalDots / Math.max(1, totalLegalBalls)) * 100)}%\n` +
-      `Boundaries: ${Math.round((totalBoundaries / Math.max(1, totalLegalBalls)) * 100)}%`;
+      `${winner}\n\n`;
+
+    sText += `🏏 Batting:\n`;
+    batsmanStats.forEach((stat, id) => {
+      const p = players.find(x => x.id === id);
+      if (p && stat.balls > 0) {
+        sText += `- ${p.name}: ${stat.runs} (${stat.balls}) [4s:${stat.fours} 6s:${stat.sixes}]\n`;
+      }
+    });
+
+    sText += `\n🎯 Bowling:\n`;
+    bowlerStats.forEach((stat, id) => {
+      const p = players.find(x => x.id === id);
+      if (p && (stat.legalBalls > 0 || stat.runs > 0)) {
+        const ovs = Math.floor(stat.legalBalls / 6) + (stat.legalBalls % 6) / 10;
+        sText += `- ${p.name}: ${stat.wickets}/${stat.runs} (${ovs.toFixed(1)} ov) [Dots:${stat.dots}]\n`;
+      }
+    });
+
+    sText += `\n📊 Extras & Info:\n` +
+      `Dot Balls: ${Math.round((totalDots / Math.max(1, totalLegalBalls)) * 100)}% | Boundaries: ${Math.round((totalBoundaries / Math.max(1, totalLegalBalls)) * 100)}%`;
 
     return {
       chartData: cdata,
@@ -144,7 +166,63 @@ const MatchSummary: React.FC = () => {
     };
   }, [match, innings, balls, players]);
 
-  if (!match || !innings) return <div className="p-4 flex justify-center mt-10">Loading summary...</div>;
+  if (!match || !innings || !balls) return <div className="p-4 flex justify-center mt-10">Loading summary...</div>;
+
+  const getBallTextDisplay = (b: Ball) => {
+    let lbl = b.runs.toString();
+    let color = 'text-gray-600 dark:text-gray-300';
+    if (b.extra_type === 'wide') { lbl = b.runs > 0 ? `${b.runs}Wd` : 'Wd'; }
+    else if (b.extra_type === 'no_ball') { lbl = b.runs > 0 ? `${b.runs}Nb` : 'Nb'; }
+    else if (b.is_wicket) { lbl = 'W'; color = 'text-red-600 font-bold'; }
+    else if (b.runs === 4) { color = 'text-blue-600 font-bold'; }
+    else if (b.runs === 6) { color = 'text-primary-600 font-bold'; }
+    else if (b.runs === 0) { lbl = '•'; }
+    return { lbl, color };
+  };
+
+  const renderOverSummary = (inn: typeof innings[0]) => {
+    const innBalls = balls?.filter(b => b.innings_id === inn.id) || [];
+    if (innBalls.length === 0) return null;
+    innBalls.sort((a, b) => {
+      if (a.timestamp && b.timestamp) return a.timestamp - b.timestamp;
+      if (a.over_number !== b.over_number) return a.over_number - b.over_number;
+      return a.ball_number - b.ball_number;
+    });
+
+    return (
+      <div className="mb-4">
+        <h4 className="font-bold text-gray-900 dark:text-gray-50 mb-2">{inn.batting_team} Innings</h4>
+        <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+          {Array.from({ length: Math.max(1, Math.ceil(inn.overs)) }).map((_, idx) => {
+            const overNumber = idx;
+            const overBalls = innBalls.filter(b => b.over_number === overNumber);
+            if (overBalls.length === 0) return null;
+            const runsInOver = overBalls.reduce((acc, b) => acc + b.runs + b.extra_runs, 0);
+
+            return (
+              <div key={idx} className="flex-shrink-0 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2 flex items-center gap-2 shadow-sm">
+                <div className="w-6 h-6 rounded-full bg-primary-50 text-primary-700 font-bold flex items-center justify-center text-xs">
+                  {idx + 1}
+                </div>
+                <div className="flex gap-1 items-center">
+                  {overBalls.map((b, bIdx) => {
+                    const { lbl, color: tColor } = getBallTextDisplay(b);
+                    return (
+                      <React.Fragment key={b.id}>
+                        {bIdx > 0 && <span className="text-gray-300 text-xs">·</span>}
+                        <span className={`text-xs ${tColor}`}>{lbl}</span>
+                      </React.Fragment>
+                    );
+                  })}
+                </div>
+                <div className="text-xs font-bold text-gray-900 dark:text-gray-50 bg-gray-100 dark:bg-gray-900 px-1.5 py-0.5 rounded ml-1">{runsInOver}</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
 
   const handleShare = async () => {
     if (navigator.share) {
@@ -175,23 +253,6 @@ const MatchSummary: React.FC = () => {
     navigator.clipboard.writeText(chatGPTText).then(() => {
       showToast('Detailed match data copied for ChatGPT!', 'success');
     });
-  };
-
-  const handleShareViewOnly = async () => {
-    const viewUrl = `${window.location.origin}${window.location.pathname}?view=true`;
-    const text = `Check out this match summary on CricSense:\n\n${summaryText}\n\nView details: ${viewUrl}`;
-
-    if (navigator.share) {
-      try {
-        await navigator.share({ title: 'CricSense View-Only Match', text });
-      } catch (err) {
-        console.error('Share failed', err);
-      }
-    } else {
-      navigator.clipboard.writeText(text).then(() => {
-        showToast('View-only link copied to clipboard!', 'info');
-      });
-    }
   };
 
   const handleArchiveMatch = () => {
@@ -249,6 +310,17 @@ const MatchSummary: React.FC = () => {
         </div>
       </Card>
 
+      <Card className="p-4 bg-white dark:bg-gray-800 shadow-sm">
+        <div className="mb-2">
+          <p className="font-bold text-gray-900 dark:text-gray-50 uppercase mb-2">Over-wise Summary</p>
+          {innings.slice().sort((a,b) => a.innings_number - b.innings_number).map(inn => (
+            <div key={inn.id}>
+              {renderOverSummary(inn)}
+            </div>
+          ))}
+        </div>
+      </Card>
+
       <Card className="p-4 bg-white dark:bg-gray-800 shadow-sm grid grid-cols-2 gap-4">
         <div className="text-center p-3 bg-gray-50 dark:bg-gray-900 rounded-xl">
           <p className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase mb-1">Dot Balls</p>
@@ -266,11 +338,8 @@ const MatchSummary: React.FC = () => {
         </Button>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 mt-4">
-        <Button variant="outline" onClick={handleShareViewOnly} className="flex gap-2.5">
-          <Share2 size={18} className="text-primary-500" /> Share View-Only
-        </Button>
-        <Button variant="primary" onClick={handleShare} className="flex gap-2.5 shadow-md shadow-primary-500/20">
+      <div className="grid grid-cols-1 gap-3 mt-4">
+        <Button variant="primary" onClick={handleShare} className="flex justify-center gap-2.5 shadow-md shadow-primary-500/20">
           <Share2 size={18} /> Share Results
         </Button>
       </div>

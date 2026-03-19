@@ -8,8 +8,7 @@ const Leaderboard: React.FC = () => {
   const [tab, setTab] = useState<'gully' | 'batsmen' | 'bowlers'>('gully');
 
   const players = useLiveQuery(async () => {
-    const all = await db.players.toArray();
-    return all.filter(p => p.is_morya_warrior);
+    return await db.players.toArray();
   }) || [];
   const matches = useLiveQuery(() => db.matches.toArray()) || [];
   const archivedMatchIds = useMemo(() => new Set(matches.filter(m => m.is_archived).map(m => m.id)), [matches]);

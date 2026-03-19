@@ -29,19 +29,25 @@ export const generateDaySummary = async (dateStr: string, matchIds: string[]) =>
   // Aggregate stats across all these matches
   const mBalls = balls.filter(b => mInningsKeys(innings, matchIds).includes(b.innings_id));
 
-  const batsmanStats = new Map<string, { runs: number, balls: number }>();
-  const bowlerStats = new Map<string, { wickets: number, runs: number }>();
+  const batsmanStats = new Map<string, { runs: number, balls: number, fours: number, sixes: number }>();
+  const bowlerStats = new Map<string, { wickets: number, runs: number, legalBalls: number, dots: number }>();
 
   mBalls.forEach(b => {
-    const bStat = batsmanStats.get(b.batsman_id) || { runs: 0, balls: 0 };
+    const bStat = batsmanStats.get(b.batsman_id) || { runs: 0, balls: 0, fours: 0, sixes: 0 };
     bStat.runs += b.runs;
     if (b.extra_type !== 'wide') bStat.balls += 1;
+    if (b.runs === 4) bStat.fours += 1;
+    if (b.runs === 6) bStat.sixes += 1;
     batsmanStats.set(b.batsman_id, bStat);
 
-    const blStat = bowlerStats.get(b.bowler_id) || { wickets: 0, runs: 0 };
-    blStat.runs += b.runs + b.extra_runs;
-    if (b.is_wicket && b.wicket_type !== 'run_out') blStat.wickets += 1;
-    bowlerStats.set(b.bowler_id, blStat);
+    if (b.bowler_id) {
+      const blStat = bowlerStats.get(b.bowler_id) || { wickets: 0, runs: 0, legalBalls: 0, dots: 0 };
+      blStat.runs += b.runs + b.extra_runs;
+      if (b.is_wicket && b.wicket_type !== 'run_out') blStat.wickets += 1;
+      if (b.extra_type !== 'wide' && b.extra_type !== 'no_ball') blStat.legalBalls += 1;
+      if (b.runs === 0 && !b.is_wicket && b.extra_type === 'none') blStat.dots += 1;
+      bowlerStats.set(b.bowler_id, blStat);
+    }
   });
 
   let topSm = { id: '', runs: -1, balls: 0 };
@@ -63,8 +69,26 @@ export const generateDaySummary = async (dateStr: string, matchIds: string[]) =>
     text += `⭐ Star Batsman of the Day:\n${tsPlayer.name} - ${topSm.runs} runs (${topSm.balls} balls)\n\n`;
   }
   if (bbPlayer && bestBm.wickets > 0) {
-    text += `🎯 Star Bowler of the Day:\n${bbPlayer.name} - ${bestBm.wickets} wkts for ${bestBm.runs} runs\n`;
+    text += `🎯 Star Bowler of the Day:\n${bbPlayer.name} - ${bestBm.wickets} wkts for ${bestBm.runs} runs\n\n`;
   }
+
+  text += `=========================\n`;
+  text += `🏏 Aggregate Batting:\n`;
+  batsmanStats.forEach((stat, id) => {
+    const p = players.find(x => x.id === id);
+    if (p && stat.balls > 0) {
+      text += `- ${p.name}: ${stat.runs} (${stat.balls}) [4s:${stat.fours} 6s:${stat.sixes}]\n`;
+    }
+  });
+
+  text += `\n🎯 Aggregate Bowling:\n`;
+  bowlerStats.forEach((stat, id) => {
+    const p = players.find(x => x.id === id);
+    if (p && (stat.legalBalls > 0 || stat.runs > 0)) {
+      const ovs = Math.floor(stat.legalBalls / 6) + (stat.legalBalls % 6) / 10;
+      text += `- ${p.name}: ${stat.wickets}/${stat.runs} (${ovs.toFixed(1)} ov) [Dots:${stat.dots}]\n`;
+    }
+  });
 
   return text;
 };

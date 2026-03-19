@@ -9,19 +9,29 @@ import { Undo2, ArrowLeftRight, Mic, MicOff, Pointer, X, RotateCcw } from 'lucid
 import type { WicketType, ExtraType, Ball } from '../database/schema';
 import { PlayerRepo } from '../database/repository';
 import Modal from '../components/Modal';
+import { useToast } from '../components/Toast';
+import { useAuth } from '../contexts/AuthContext';
 
 const WICKET_TYPES: WicketType[] = ['bowled', 'caught', 'run_out', 'stumped', 'lbw', 'hit_wicket'];
 
 const LiveScoring: React.FC = () => {
   const { matchId } = useParams<{ matchId: string }>();
   const navigate = useNavigate();
+  const { showToast } = useToast();
+  const { isAdmin } = useAuth();
 
   const match = useLiveQuery(() => db.matches.get(matchId || ''));
   const allPlayers = useLiveQuery(() => db.players.toArray()) || [];
   const inningsList = useLiveQuery(() => db.innings.where('match_id').equals(matchId || '').toArray());
   const balls = useLiveQuery(() => matchId ? db.balls.toArray() : []);
 
-  const [activeInnings, setActiveInnings] = useState<any>(null);
+  const activeInnings = useLiveQuery(async () => {
+    if (!matchId) return null;
+    const list = await db.innings.where('match_id').equals(matchId).toArray();
+    if (list.length === 0) return null;
+    return list.reduce((prev, current) => (prev.innings_number > current.innings_number) ? prev : current);
+  }, [matchId]);
+
   const [inningsBalls, setInningsBalls] = useState<Ball[]>([]);
 
   const [showWicketModal, setShowWicketModal] = useState(false);
@@ -111,12 +121,7 @@ const LiveScoring: React.FC = () => {
     };
   }, [isVoiceMode]);
 
-  useEffect(() => {
-    if (inningsList && inningsList.length > 0) {
-      const latest = inningsList.reduce((prev, current) => (prev.innings_number > current.innings_number) ? prev : current);
-      setActiveInnings(latest);
-    }
-  }, [inningsList]);
+  // Removed manual activeInnings useEffect in favor of useLiveQuery
 
   useEffect(() => {
     if (activeInnings && balls) {
@@ -145,16 +150,22 @@ const LiveScoring: React.FC = () => {
     }
   }, [inningsBalls]);
 
+  const isInningsComplete = (activeInnings && match) ? (activeInnings.wickets >= 10 || activeInnings.overs >= match.overs) : false;
+  const innings1 = inningsList?.find(i => i.innings_number === 1);
+  const innings1Runs = innings1?.runs || match?.first_innings_total || 0;
+  const isMatchComplete = (match && activeInnings) ? (match.status === 'completed' || (activeInnings.innings_number === 2 && (isInningsComplete || activeInnings.runs > innings1Runs))) : false;
+
+  // Handle Match Completion globally in a side-effect
+  useEffect(() => {
+    if (!match || !activeInnings) return;
+    // Only update if criteria met AND it's not already 'completed' in DB
+    if (isMatchComplete && match.status !== 'completed' && !(window as any).__isRealtimeUpdate) {
+      console.log('LiveScoring: Flagging match as completed');
+      MatchRepo.updateStatus(match.id, 'completed');
+    }
+  }, [match?.id, match?.status, isMatchComplete]);
+
   if (!match || !activeInnings) return <div className="p-4 text-center">Loading match...</div>;
-
-  const isInningsComplete = activeInnings.wickets >= 10 || activeInnings.overs >= match.overs;
-  const innings1 = inningsList!.find(i => i.innings_number === 1);
-  const innings1Runs = innings1?.runs || match.first_innings_total || 0;
-  const isMatchComplete = match.status === 'completed' || (activeInnings.innings_number === 2 && (isInningsComplete || activeInnings.runs > innings1Runs));
-
-  if (isMatchComplete && match.status !== 'completed') {
-    MatchRepo.updateStatus(match.id, 'completed');
-  }
 
   const battingTeamPlayers = allPlayers.filter(p =>
     (activeInnings.batting_team === match.teamA ? match.teamAPlayers : (match.teamBPlayers || [])).includes(p.id)
@@ -204,15 +215,12 @@ const LiveScoring: React.FC = () => {
     snackbarTimer.current = setTimeout(() => setSnackbarUndo(false), 3000);
   };
 
-  const handleScoreBall = async (runs: number, extra: ExtraType = 'none', isWicket: boolean = false, wicketType: WicketType = 'none', outPlayerId?: string, fielderId?: string) => {
-    const missing = [];
-    if (!striker) missing.push("Striker");
-    if (!nonStriker) missing.push("Non-Striker");
-    if (!bowler) missing.push("Bowler");
 
-    if (missing.length > 0 || !striker || !nonStriker || !bowler) {
-      alert(`Please select ${missing.join(', ')} to continue scoring.`);
-      return;
+  const handleScoreBall = async (runs: number, extra: ExtraType = 'none', isWicket: boolean = false, wicketType: WicketType = 'none', outPlayerId?: string, fielderId?: string) => {
+    if (!striker || !nonStriker || !bowler) {
+      showToast("Missing players. Please select them manually.", "info");
+      setShowPlayerSelectModal({ type: !striker ? 'striker' : (!nonStriker ? 'non_striker' : 'bowler'), open: true });
+      return; 
     }
 
     const isLegal = extra !== 'wide' && extra !== 'no_ball';
@@ -289,17 +297,39 @@ const LiveScoring: React.FC = () => {
 
   const saveEditedBall = async () => {
     if (!editingBall) return;
+    const oldRuns = editingBall.runs;
+    const oldExtraRuns = editingBall.extra_runs;
+    const oldWicket = editingBall.is_wicket ? 1 : 0;
+    const oldLegal = (editingBall.extra_type !== 'wide' && editingBall.extra_type !== 'no_ball') ? 1 : 0;
 
-    let extraRuns = 0;
-    if (editExtra === 'wide' || editExtra === 'no_ball') extraRuns = 1;
+    let newExtraRuns = 0;
+    if (editExtra === 'wide' || editExtra === 'no_ball') newExtraRuns = 1;
+
+    const newWicket = editIsWicket ? 1 : 0;
+    const newLegal = (editExtra !== 'wide' && editExtra !== 'no_ball') ? 1 : 0;
+
+    const runDiff = (editScore + newExtraRuns) - (oldRuns + oldExtraRuns);
+    const wicketDiff = newWicket - oldWicket;
+    const legalDiff = newLegal - oldLegal;
 
     await db.balls.update(editingBall.id, {
       runs: editScore,
       extra_type: editExtra,
-      extra_runs: extraRuns,
+      extra_runs: newExtraRuns,
       is_wicket: editIsWicket,
       wicket_type: editWicketType
     });
+
+    const innings = await db.innings.get(activeInnings.id);
+    if (innings) {
+      const newBallsBowled = Math.max(0, innings.balls_bowled + legalDiff);
+      await db.innings.update(activeInnings.id, {
+        runs: Math.max(0, innings.runs + runDiff),
+        wickets: Math.max(0, innings.wickets + wicketDiff),
+        balls_bowled: newBallsBowled,
+        overs: Math.floor(newBallsBowled / 6) + (newBallsBowled % 6) / 10
+      });
+    }
 
     setEditingBall(null);
   };
@@ -393,18 +423,20 @@ const LiveScoring: React.FC = () => {
   return (
     <div className="flex flex-col h-full bg-gray-50 dark:bg-gray-900">
       {/* Top Bar */}
-      <div className="bg-primary-600 text-white px-4 py-2.5 shadow">
+      <div className="bg-primary-600 text-white px-3 py-1.5 shadow">
         <div className="flex items-center justify-between">
           <div className="flex-1">
             <div className="font-bold text-base leading-tight flex items-center gap-2">
               {activeInnings.batting_team}
-              <button
-                onClick={handleManualEndMatch}
-                className="bg-white/10 hover:bg-white/20 p-1.5 rounded-lg transition-colors"
-                title="End Match"
-              >
-                <X size={14} />
-              </button>
+              {isAdmin && (
+                <button
+                  onClick={handleManualEndMatch}
+                  className="bg-white/10 hover:bg-white/20 p-1.5 rounded-lg transition-colors"
+                  title="End Match"
+                >
+                  <X size={14} />
+                </button>
+              )}
             </div>
             <div className="text-xs text-primary-100 font-medium mt-0.5">
               Overs: <span className="text-white font-bold">{activeInnings.overs.toFixed(1)}</span> / {match.overs}
@@ -413,7 +445,7 @@ const LiveScoring: React.FC = () => {
               )}
             </div>
           </div>
-          <div className="text-3xl font-black">{activeInnings.runs}/{activeInnings.wickets}</div>
+          <div className="text-2xl font-black">{activeInnings.runs}/{activeInnings.wickets}</div>
         </div>
         {/* Second innings chase info (feature 2.7) */}
         {chaseInfo && chaseInfo.runsNeeded > 0 && (
@@ -424,21 +456,23 @@ const LiveScoring: React.FC = () => {
         )}
       </div>
 
-      <div className="bg-white dark:bg-gray-800 px-4 py-2 flex gap-2 border-b dark:border-gray-700">
-        <button
-          onClick={() => setIsVoiceMode(!isVoiceMode)}
-          className={`px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 transition-colors ${isVoiceMode ? 'bg-red-500 text-white animate-pulse' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'}`}
-        >
-          {isVoiceMode ? <Mic size={14} /> : <MicOff size={14} />}
-          {isVoiceMode ? 'Voice ON' : 'Voice Mode'}
-        </button>
-        <button
-          onClick={() => setIsTapMode(true)}
-          className="px-3 py-1.5 rounded-full text-xs font-bold bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 flex items-center gap-1.5"
-        >
-          <Pointer size={14} /> Tap Mode
-        </button>
-      </div>
+      {isAdmin && (
+        <div className="bg-white dark:bg-gray-800 px-3 py-1.5 flex gap-2 border-b dark:border-gray-700">
+          <button
+            onClick={() => setIsVoiceMode(!isVoiceMode)}
+            className={`px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 transition-colors ${isVoiceMode ? 'bg-red-500 text-white animate-pulse' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'}`}
+          >
+            {isVoiceMode ? <Mic size={14} /> : <MicOff size={14} />}
+            {isVoiceMode ? 'Voice ON' : 'Voice Mode'}
+          </button>
+          <button
+            onClick={() => setIsTapMode(true)}
+            className="px-3 py-1.5 rounded-full text-xs font-bold bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 flex items-center gap-1.5"
+          >
+            <Pointer size={14} /> Tap Mode
+          </button>
+        </div>
+      )}
 
       <div className="p-3 overflow-y-auto flex-1">
         {isMatchComplete ? (
@@ -447,28 +481,69 @@ const LiveScoring: React.FC = () => {
             <Button onClick={() => navigate(`/summary/${match.id}`)} fullWidth>View Summary</Button>
           </Card>
         ) : isInningsComplete ? (
-          <Card className="p-6 text-center space-y-4">
-            <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-50">Innings Break</h2>
-            <Button onClick={handleEndInnings} fullWidth>Start Next Innings</Button>
-          </Card>
+          <>
+            <Card className="p-6 text-center space-y-4 mb-4">
+              <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-50">Innings Break</h2>
+              {isAdmin && (
+                <Button onClick={handleEndInnings} fullWidth>Start Next Innings</Button>
+              )}
+              {!isAdmin && (
+                <div className="text-gray-500 dark:text-gray-400">Waiting for next innings to start...</div>
+              )}
+            </Card>
+            <div className="mb-2">
+              <div className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase mb-1.5 ml-1">Over-wise Summary</div>
+              <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+                {Array.from({ length: Math.max(1, Math.ceil(activeInnings.overs)) }).map((_, idx) => {
+                  const overNumber = idx;
+                  const overBalls = inningsBalls.filter(b => b.over_number === overNumber);
+                  if (overBalls.length === 0) return null;
+
+                  const runsInOver = overBalls.reduce((acc, b) => acc + b.runs + b.extra_runs, 0);
+
+                  return (
+                    <div key={idx} className="flex-shrink-0 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2 flex items-center gap-2 shadow-sm">
+                      <div className="w-6 h-6 rounded-full bg-primary-50 text-primary-700 font-bold flex items-center justify-center text-xs">
+                        {idx + 1}
+                      </div>
+                      <div className="flex gap-1 items-center">
+                        {overBalls.map((b, bIdx) => {
+                          const { lbl, color: tColor } = getBallTextDisplay(b);
+                          return (
+                            <React.Fragment key={b.id}>
+                              {bIdx > 0 && <span className="text-gray-300 text-xs">·</span>}
+                              <button onClick={isAdmin ? () => setRevertBall(b) : undefined} className={`text-xs ${tColor} ${isAdmin ? 'active:scale-95 transition-transform font-semibold cursor-pointer' : 'font-semibold cursor-default'}`}>{lbl}</button>
+                            </React.Fragment>
+                          );
+                        })}
+                      </div>
+                      <div className="text-xs font-bold text-gray-900 dark:text-gray-50 bg-gray-100 dark:bg-gray-900 px-1.5 py-0.5 rounded ml-1">{runsInOver}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </>
         ) : (
           <>
-            <div className="grid grid-cols-2 gap-2 mb-3">
-              <Card className="p-3 border-l-4 border-l-amber-500 relative">
+            <div className="grid grid-cols-2 gap-2 mb-2">
+              <Card className="p-2 border-l-4 border-l-amber-500 relative">
                 <div className="flex justify-between items-center mb-1">
                   <div className="text-xs text-gray-500 dark:text-gray-400 font-bold uppercase">Batting</div>
-                  <button onClick={async () => {
-                    await db.innings.update(activeInnings.id, {
-                      striker_id: activeInnings.non_striker_id,
-                      non_striker_id: activeInnings.striker_id
-                    });
-                  }} className="text-primary-600 bg-primary-50 p-1 rounded-full active:bg-primary-100 shadow-sm border border-primary-100">
-                    <ArrowLeftRight size={14} />
-                  </button>
+                  {isAdmin && (
+                    <button onClick={async () => {
+                      await db.innings.update(activeInnings.id, {
+                        striker_id: activeInnings.non_striker_id,
+                        non_striker_id: activeInnings.striker_id
+                      });
+                    }} className="text-primary-600 bg-primary-50 p-1 rounded-full active:bg-primary-100 shadow-sm border border-primary-100">
+                      <ArrowLeftRight size={14} />
+                    </button>
+                  )}
                 </div>
                 <div
-                  className="flex justify-between items-center py-1 cursor-pointer active:bg-gray-50 dark:bg-gray-900"
-                  onClick={() => setShowPlayerSelectModal({ type: 'striker', open: true })}
+                  className={`flex justify-between items-center py-1 ${isAdmin ? 'cursor-pointer active:bg-gray-50 dark:bg-gray-900' : ''}`}
+                  onClick={() => isAdmin && setShowPlayerSelectModal({ type: 'striker', open: true })}
                 >
                   <span className="font-bold text-gray-900 dark:text-gray-50 truncate">
                     {striker?.name || 'Select Striker'} <span className="text-amber-500">*</span>
@@ -476,19 +551,19 @@ const LiveScoring: React.FC = () => {
                   {strStats && <span className="text-sm font-medium text-gray-600 dark:text-gray-300">{strStats.runs}({strStats.ballsFaced})</span>}
                 </div>
                 <div
-                  className="flex justify-between items-center py-1 cursor-pointer active:bg-gray-50 dark:bg-gray-900 text-gray-600 dark:text-gray-300"
-                  onClick={() => setShowPlayerSelectModal({ type: 'non_striker', open: true })}
+                  className={`flex justify-between items-center py-1 text-gray-600 dark:text-gray-300 ${isAdmin ? 'cursor-pointer active:bg-gray-50 dark:bg-gray-900' : ''}`}
+                  onClick={() => isAdmin && setShowPlayerSelectModal({ type: 'non_striker', open: true })}
                 >
                   <span className="font-medium truncate">{nonStriker?.name || 'Select Non-Striker'}</span>
                   {nStrStats && <span className="text-sm">{nStrStats.runs}({nStrStats.ballsFaced})</span>}
                 </div>
               </Card>
 
-              <Card className="p-3 border-l-4 border-l-blue-500">
+              <Card className="p-2 border-l-4 border-l-blue-500">
                 <div className="text-xs text-gray-500 dark:text-gray-400 font-bold uppercase mb-1">Bowling</div>
                 <div
-                  className="flex justify-between items-center py-1 cursor-pointer active:bg-gray-50 dark:bg-gray-900"
-                  onClick={() => setShowPlayerSelectModal({ type: 'bowler', open: true })}
+                  className={`flex justify-between items-center py-1 ${isAdmin ? 'cursor-pointer active:bg-gray-50 dark:bg-gray-900' : ''}`}
+                  onClick={() => isAdmin && setShowPlayerSelectModal({ type: 'bowler', open: true })}
                 >
                   <span className="font-bold text-gray-900 dark:text-gray-50 truncate">{bowler?.name || 'Select Bowler'}</span>
                   {bwlStats && <span className="text-sm font-medium text-gray-600 dark:text-gray-300">{bwlStats.runsGiven}-{bwlStats.wickets} <span className="text-xs text-gray-400">({bwlStats.overs.toFixed(1)})</span></span>}
@@ -496,30 +571,34 @@ const LiveScoring: React.FC = () => {
               </Card>
             </div>
 
-            {/* Scoring Buttons */}
-            <div className="grid grid-cols-4 gap-2 mb-2">
-              <Button variant="secondary" className="h-16 text-xl font-bold rounded-2xl" onClick={() => handleScoreBall(0)}>•</Button>
-              <Button variant="secondary" className="h-16 text-xl font-bold rounded-2xl" onClick={() => handleScoreBall(1)}>1</Button>
-              <Button variant="secondary" className="h-16 text-xl font-bold rounded-2xl" onClick={() => handleScoreBall(2)}>2</Button>
-              <Button variant="secondary" className="h-16 text-xl font-bold rounded-2xl" onClick={() => handleScoreBall(3)}>3</Button>
-            </div>
+            {/* Scoring Buttons (Admin Only) */}
+            {isAdmin && (
+              <>
+                <div className="grid grid-cols-4 gap-2 mb-2 mt-4">
+                  <Button variant="secondary" className="h-14 text-lg font-bold rounded-xl" onClick={() => handleScoreBall(0)}>•</Button>
+                  <Button variant="secondary" className="h-14 text-lg font-bold rounded-xl" onClick={() => handleScoreBall(1)}>1</Button>
+                  <Button variant="secondary" className="h-14 text-lg font-bold rounded-xl" onClick={() => handleScoreBall(2)}>2</Button>
+                  <Button variant="secondary" className="h-14 text-lg font-bold rounded-xl" onClick={() => handleScoreBall(3)}>3</Button>
+                </div>
 
-            <div className="grid grid-cols-4 gap-2 mb-2">
-              <Button variant="primary" className="h-16 text-xl font-bold rounded-2xl bg-blue-500 hover:bg-blue-600" onClick={() => handleScoreBall(4)}>4</Button>
-              <Button variant="primary" className="h-16 text-xl font-bold rounded-2xl" onClick={() => handleScoreBall(6)}>6</Button>
-              <Button variant="danger" className="h-16 text-xl font-bold rounded-2xl col-span-2" onClick={() => setShowWicketModal(true)}>WICKET</Button>
-            </div>
+                <div className="grid grid-cols-4 gap-2 mb-2">
+                  <Button variant="primary" className="h-14 text-lg font-bold rounded-xl bg-blue-500 hover:bg-blue-600" onClick={() => handleScoreBall(4)}>4</Button>
+                  <Button variant="primary" className="h-14 text-lg font-bold rounded-xl" onClick={() => handleScoreBall(6)}>6</Button>
+                  <Button variant="danger" className="h-14 text-lg font-bold rounded-xl col-span-2" onClick={() => setShowWicketModal(true)}>WICKET</Button>
+                </div>
 
-            <div className="grid grid-cols-3 gap-2 mb-4">
-              <Button variant="outline" className="h-14 font-bold border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:bg-gray-800" onClick={() => setShowExtraRunsModal('wide')}>WD</Button>
-              <Button variant="outline" className="h-14 font-bold border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:bg-gray-800" onClick={() => setShowExtraRunsModal('no_ball')}>NB</Button>
-              <Button variant="ghost" className="h-14 font-bold text-gray-500 dark:text-gray-400 bg-gray-200 dark:bg-gray-700" onClick={handleUndo}>
-                <Undo2 size={20} />
-              </Button>
-            </div>
+                <div className="grid grid-cols-3 gap-2 mb-2">
+                  <Button variant="outline" className="h-12 font-bold border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:bg-gray-800" onClick={() => setShowExtraRunsModal('wide')}>WD</Button>
+                  <Button variant="outline" className="h-12 font-bold border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:bg-gray-800" onClick={() => setShowExtraRunsModal('no_ball')}>NB</Button>
+                  <Button variant="ghost" className="h-12 font-bold text-gray-500 dark:text-gray-400 bg-gray-200 dark:bg-gray-700" onClick={handleUndo}>
+                    <Undo2 size={20} />
+                  </Button>
+                </div>
+              </>
+            )}
 
             {/* Recent balls — right-anchored (feature 2.6) */}
-            <div className="mb-3">
+            <div className={`mb-2 ${!isAdmin ? 'mt-6' : ''}`}>
               <div className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase mb-1.5 ml-1">Recent Balls</div>
               <div
                 ref={ballTimelineRef}
@@ -530,8 +609,8 @@ const LiveScoring: React.FC = () => {
                   return (
                     <button
                       key={b.id}
-                      onClick={() => setRevertBall(b)}
-                      className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm border shadow-sm transition-transform active:scale-95 ${color}`}
+                      onClick={isAdmin ? () => setRevertBall(b) : undefined}
+                      className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm border shadow-sm ${isAdmin ? 'transition-transform active:scale-95 cursor-pointer' : 'cursor-default'} ${color}`}
                     >
                       {lbl}
                     </button>
@@ -542,7 +621,7 @@ const LiveScoring: React.FC = () => {
 
             {/* Over-wise Summary — single-line scrollable (feature 2.4) */}
             {inningsBalls.length > 0 && (
-              <div className="mb-3">
+              <div className="mb-2">
                 <div className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase mb-1.5 ml-1">Over-wise Summary</div>
                 <div
                   ref={overSummaryRef}
@@ -664,7 +743,20 @@ const LiveScoring: React.FC = () => {
               />
               <Button onClick={async () => {
                 if (!newPlayerName.trim()) return;
-                const pid = await PlayerRepo.add(newPlayerName.trim());
+                const searchLower = newPlayerName.trim().toLowerCase();
+                const existing = allPlayers.find(p => p.name.toLowerCase() === searchLower);
+                let pid = '';
+                if (existing) {
+                  const alreadyInTeam = (activeInnings.batting_team === match.teamA ? match.teamAPlayers : match.teamBPlayers).includes(existing.id) ||
+                                        (activeInnings.bowling_team === match.teamA ? match.teamAPlayers : match.teamBPlayers).includes(existing.id);
+                  if (alreadyInTeam) {
+                    showToast("Player already exists in a team.", "error");
+                    return;
+                  }
+                  pid = existing.id;
+                } else {
+                  pid = await PlayerRepo.add(newPlayerName.trim());
+                }
                 const team = showPlayerSelectModal.type === 'bowler'
                   ? (activeInnings.bowling_team === match.teamA ? 'A' : 'B')
                   : (activeInnings.batting_team === match.teamA ? 'A' : 'B');
@@ -675,11 +767,29 @@ const LiveScoring: React.FC = () => {
                 if (showPlayerSelectModal.type === 'non_striker') updateObj.non_striker_id = pid;
                 if (showPlayerSelectModal.type === 'bowler') updateObj.bowler_id = pid;
 
-                await db.innings.update(activeInnings.id, updateObj);
+                await InningsRepo.updatePlayers(activeInnings.id, updateObj);
                 setNewPlayerName('');
                 setShowPlayerSelectModal({ type: 'striker', open: false });
               }} size="sm">Add</Button>
             </div>
+
+            <Button
+              variant="secondary"
+              fullWidth
+              className="mb-4 py-3 bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-800"
+              onClick={() => {
+                const available = (showPlayerSelectModal.type === 'bowler' ? bowlingTeamPlayers : battingTeamPlayers)
+                  .filter(p => p.id !== activeInnings.striker_id && p.id !== activeInnings.non_striker_id && p.id !== activeInnings.bowler_id);
+                if (available.length > 0) {
+                  const picked = available[Math.floor(Math.random() * available.length)];
+                  setNewPlayerName(picked.name);
+                } else {
+                  showToast("No other players available to suggest.", "info");
+                }
+              }}
+            >
+              🎲 Suggest Random Player
+            </Button>
 
             <div className="space-y-2">
               {(showPlayerSelectModal.type === 'bowler' ? bowlingTeamPlayers : battingTeamPlayers).map(p => (
@@ -690,7 +800,7 @@ const LiveScoring: React.FC = () => {
                     if (showPlayerSelectModal.type === 'striker') updateObj.striker_id = p.id;
                     if (showPlayerSelectModal.type === 'non_striker') updateObj.non_striker_id = p.id;
                     if (showPlayerSelectModal.type === 'bowler') updateObj.bowler_id = p.id;
-                    await db.innings.update(activeInnings.id, updateObj);
+                    await InningsRepo.updatePlayers(activeInnings.id, updateObj);
                     setShowPlayerSelectModal({ type: 'striker', open: false });
                   }}
                   className={`w-full py-3 px-4 rounded-xl text-left font-semibold ${activeInnings.striker_id === p.id || activeInnings.non_striker_id === p.id || activeInnings.bowler_id === p.id
@@ -757,12 +867,26 @@ const LiveScoring: React.FC = () => {
         <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center">
           <div className="bg-white dark:bg-gray-800 w-full max-w-sm rounded-t-3xl sm:rounded-3xl p-5 pb-8 max-h-[80vh] overflow-y-auto animate-in slide-in-from-bottom-10 sm:zoom-in duration-200">
             <h3 className="text-xl font-bold text-gray-900 dark:text-gray-50 mb-2">Run Out on {pendingExtraRunOut.extra === 'wide' ? 'Wide' : 'No Ball'}</h3>
-            <p className="text-sm text-gray-500 mb-4">Who got run out?</p>
+            
+            <p className="text-sm text-gray-500 mb-2">Runs completed before wicket:</p>
+            <div className="flex gap-2 mb-4">
+              {[0, 1, 2, 3].map(r => (
+                <button
+                  key={r}
+                  onClick={() => setPendingExtraRunOut({ ...pendingExtraRunOut, runs: r })}
+                  className={`flex-1 py-2 rounded-xl font-bold border transition-colors ${pendingExtraRunOut.runs === r ? 'bg-primary-600 text-white border-primary-600' : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 border-gray-200 dark:border-gray-700'}`}
+                >
+                  {r}
+                </button>
+              ))}
+            </div>
+
+            <p className="text-sm text-gray-500 mb-2">Who got run out?</p>
             <div className="space-y-2">
               {striker && (
                 <button
                   onClick={() => {
-                    handleScoreBall(0, pendingExtraRunOut.extra, true, 'run_out', striker.id);
+                    handleScoreBall(pendingExtraRunOut.runs, pendingExtraRunOut.extra, true, 'run_out', striker.id);
                   }}
                   className="w-full py-3 px-4 rounded-xl text-left font-semibold bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-800 dark:text-gray-100 active:bg-red-50 active:border-red-200"
                 >
@@ -772,7 +896,7 @@ const LiveScoring: React.FC = () => {
               {nonStriker && (
                 <button
                   onClick={() => {
-                    handleScoreBall(0, pendingExtraRunOut.extra, true, 'run_out', nonStriker.id);
+                    handleScoreBall(pendingExtraRunOut.runs, pendingExtraRunOut.extra, true, 'run_out', nonStriker.id);
                   }}
                   className="w-full py-3 px-4 rounded-xl text-left font-semibold bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-800 dark:text-gray-100 active:bg-red-50 active:border-red-200"
                 >
@@ -819,6 +943,78 @@ const LiveScoring: React.FC = () => {
             </div>
 
             <Button variant="ghost" fullWidth className="mt-4" onClick={() => setRevertBall(null)}>Cancel</Button>
+          </Card>
+        </div>
+      )}
+
+      {/* Edit Ball Modal (feature 2.2) */}
+      {editingBall && (
+        <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4 backdrop-blur-sm">
+          <Card className="w-full max-w-md p-6 animate-in zoom-in duration-200 shadow-2xl">
+            <h3 className="text-xl font-bold text-gray-900 dark:text-gray-50 mb-4">Edit Ball {editingBall.over_number}.{editingBall.ball_number}</h3>
+            
+            <div className="space-y-4 mb-6">
+              <div>
+                <label className="text-sm font-semibold text-gray-700 dark:text-gray-200 block mb-2">Runs Scored (Bat)</label>
+                <div className="flex gap-2">
+                  {[0, 1, 2, 3, 4, 6].map(r => (
+                    <button
+                      key={r}
+                      onClick={() => setEditScore(r)}
+                      className={`flex-1 py-2 rounded-xl font-bold border transition-colors ${editScore === r ? 'bg-primary-600 text-white border-primary-600' : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 border-gray-200 dark:border-gray-700'}`}
+                    >
+                      {r}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-sm font-semibold text-gray-700 dark:text-gray-200 block mb-2">Extras</label>
+                <div className="flex flex-wrap gap-2">
+                  {['none', 'wide', 'no_ball', 'bye', 'leg_bye'].map(e => (
+                    <button
+                      key={e}
+                      onClick={() => setEditExtra(e as ExtraType)}
+                      className={`flex-1 min-w-[70px] py-1.5 text-xs rounded-lg font-bold border transition-colors capitalize ${editExtra === e ? 'bg-primary-600 text-white border-primary-600' : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 border-gray-200 dark:border-gray-700'}`}
+                    >
+                      {e.replace('_', ' ')}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-sm font-semibold text-gray-700 dark:text-gray-200 block mb-2">Wicket?</label>
+                <div className="flex items-center justify-between bg-gray-100 dark:bg-gray-800 p-3 rounded-xl border border-gray-200 dark:border-gray-700">
+                  <span className="font-medium text-gray-800 dark:text-gray-100">Is Wicket</span>
+                  <button 
+                    onClick={() => setEditIsWicket(!editIsWicket)}
+                    className={`w-12 h-6 rounded-full relative transition-colors ${editIsWicket ? 'bg-red-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+                  >
+                    <div className={`w-5 h-5 bg-white rounded-full absolute top-0.5 transition-transform ${editIsWicket ? 'right-0.5' : 'left-0.5'}`}></div>
+                  </button>
+                </div>
+                {editIsWicket && (
+                  <div className="flex flex-wrap gap-2 mt-3">
+                    {WICKET_TYPES.map(w => (
+                      <button
+                        key={w}
+                        onClick={() => setEditWicketType(w)}
+                        className={`px-3 py-1.5 text-xs rounded-lg font-bold border transition-colors capitalize ${editWicketType === w ? 'bg-red-500 text-white border-red-500' : 'bg-red-50 dark:bg-gray-800 text-red-600 dark:text-red-400 border-red-200 dark:border-red-800'}`}
+                      >
+                        {w.replace('_', ' ')}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <Button variant="ghost" fullWidth onClick={() => setEditingBall(null)}>Cancel</Button>
+              <Button variant="primary" fullWidth onClick={saveEditedBall}>Save Changes</Button>
+            </div>
           </Card>
         </div>
       )}

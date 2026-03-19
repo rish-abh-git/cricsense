@@ -6,12 +6,14 @@ import Card from '../components/Card';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../database/db';
 import { generateDaySummary, generateBallWiseSummary, shareText } from '../utils/shareUtils';
-import { Share2, MessageSquareQuote } from 'lucide-react';
+import { Share2, MessageSquareQuote, ShieldAlert } from 'lucide-react';
 import { useToast } from '../components/Toast';
+import { useAuth } from '../contexts/AuthContext';
 
 const Home: React.FC = () => {
   const navigate = useNavigate();
   const { showToast } = useToast();
+  const { isAdmin } = useAuth();
 
   const allMatches = useLiveQuery(async () => {
     const matches = await db.matches.reverse().sortBy('date');
@@ -53,10 +55,16 @@ const Home: React.FC = () => {
           <Trophy size={40} className="text-primary-600" />
         </div>
         <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-50">Welcome to CricSense</h2>
-        <p className="text-gray-500 dark:text-gray-400 mt-2 text-sm">Offline-first tennis cricket scorer</p>
+        <p className="text-gray-500 dark:text-gray-400 mt-2 text-sm mb-4">Offline-first tennis cricket scorer</p>
+        
+        {!isAdmin && (
+          <Button variant="outline" size="sm" onClick={() => navigate('/login')} className="mx-auto flex gap-2">
+            <ShieldAlert size={16} /> Admin Login
+          </Button>
+        )}
       </section>
 
-      {!isViewOnly && (
+      {!isViewOnly && isAdmin && (
         <div className="grid grid-cols-1 gap-4">
           <Button
             onClick={() => navigate('/setup')}
@@ -126,6 +134,11 @@ const Home: React.FC = () => {
                 </div>
                 {match.winner && (
                   <p className="text-sm text-primary-600 font-medium mt-2">{match.winner} won</p>
+                )}
+                {match.status === 'ongoing' && (
+                  <Button onClick={(e) => { e.stopPropagation(); navigate(`/scoring/${match.id}`); }} size="sm" className="mt-3 flex items-center justify-center gap-2" variant={isAdmin ? "primary" : "secondary"} fullWidth>
+                    {isAdmin ? <><PlayCircle size={16} /> Continue Scoring</> : <><PlayCircle size={16} /> Watch Live</>}
+                  </Button>
                 )}
               </Card>
             ))}

@@ -3,16 +3,21 @@ import { useNavigate } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../database/db';
 import { PlayerRepo, MatchRepo, InningsRepo } from '../database/repository';
+import { supabase } from '../database/supabaseClient';
+import { mapMatchPayload } from '../database/syncUtils';
 import Button from '../components/Button';
 import Card from '../components/Card';
 import Input from '../components/Input';
-import { PlusCircle, Search, X, CheckCircle2, Circle } from 'lucide-react';
+import { PlusCircle, Search, X } from 'lucide-react';
+import { useToast } from '../components/Toast';
 import type { Player } from '../database/schema';
+import TossModal from '../components/TossModal';
 
-type SetupStep = 'teams' | 'batting_first' | 'attendance';
+type SetupStep = 'teams' | 'toss' | 'batting_first';
 
 const MatchSetup: React.FC = () => {
   const navigate = useNavigate();
+  const { showToast } = useToast();
   const allPlayers = useLiveQuery(() => db.players.toArray()) || [];
 
   const [teamAName, setTeamAName] = useState('Morya Warriors');
@@ -32,11 +37,10 @@ const MatchSetup: React.FC = () => {
   // Feature 2.3 — Mock target
   const [mockTarget, setMockTarget] = useState<string>('');
 
-  // Feature 2.8 — Attendance for Morya Warriors
-  const [presentPlayers, setPresentPlayers] = useState<string[]>([]);
-
   // Setup flow step
   const [step, setStep] = useState<SetupStep>('teams');
+  const [tossWinner, setTossWinner] = useState<string>('');
+  const [tossDecision, setTossDecision] = useState<'bat' | 'bowl'>('bat');
 
   const filteredPlayers = allPlayers.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase()) &&
     !teamAPlayers.some(tp => tp.id === p.id) &&
@@ -45,7 +49,17 @@ const MatchSetup: React.FC = () => {
 
   const handleAddPlayer = async () => {
     if (!searchQuery.trim()) return;
-    const existing = allPlayers.find(p => p.name.toLowerCase() === searchQuery.trim().toLowerCase());
+    const searchLower = searchQuery.trim().toLowerCase();
+
+    const alreadySelected = teamAPlayers.some(p => p.name.toLowerCase() === searchLower) || 
+                            teamBPlayers.some(p => p.name.toLowerCase() === searchLower);
+                            
+    if (alreadySelected) {
+      showToast("Player is already in a team.", "error");
+      return;
+    }
+
+    const existing = allPlayers.find(p => p.name.toLowerCase() === searchLower);
 
     let playerToAdd = existing;
     if (!existing) {
@@ -73,31 +87,27 @@ const MatchSetup: React.FC = () => {
 
   const handleProceedToNext = () => {
     if (!teamAName.trim() || !teamBName.trim()) {
-      alert("Please enter names for both teams.");
+      showToast("Please enter names for both teams.", "error");
       return;
     }
-    setStep('batting_first');
+    setStep('toss');
   };
 
-  // Morya Warriors players from DB (only those with is_morya_warrior flag)
-  const moryaWarriorPlayers = allPlayers.filter(p => p.is_morya_warrior);
+  const handleTossComplete = (winner: string, decision: 'bat' | 'bowl') => {
+    setTossWinner(winner);
+    setTossDecision(decision);
+    
+    // Determine batting first based on toss
+    const btFirst = decision === 'bat' ? winner : (winner === teamAName ? teamBName : teamAName);
+    setBattingFirst(btFirst);
+    
+    // Start match immediately after toss (removed attendance step)
+    handleStartMatch(btFirst);
+  };
 
   const handleSelectBattingFirst = (team: string) => {
     setBattingFirst(team);
-    // Show attendance if there are Morya Warriors players in the DB
-    if (moryaWarriorPlayers.length > 0) {
-      // Pre-select all Morya Warriors players
-      setPresentPlayers(moryaWarriorPlayers.map(p => p.id));
-      setStep('attendance');
-    } else {
-      handleStartMatch(team);
-    }
-  };
-
-  const toggleAttendance = (playerId: string) => {
-    setPresentPlayers(prev =>
-      prev.includes(playerId) ? prev.filter(id => id !== playerId) : [...prev, playerId]
-    );
+    handleStartMatch(team);
   };
 
   const handleStartMatch = async (battingTeam?: string) => {
@@ -111,7 +121,9 @@ const MatchSetup: React.FC = () => {
       teamBPlayers.map(p => p.id),
       overs,
       bt,
-      presentPlayers.length > 0 ? presentPlayers : undefined,
+      undefined, // attendance removed
+      tossWinner,
+      tossDecision
     );
 
     // Mock target (feature 2.3)
@@ -122,10 +134,15 @@ const MatchSetup: React.FC = () => {
       const battingTeamName = bt || teamAName;
       const bowlingTeamName = battingTeamName === teamAName ? teamBName : teamAName;
       const inningsId = await InningsRepo.create(matchId, battingTeamName, bowlingTeamName, 1);
-      // Set the innings as completed with the mock runs
-      await db.innings.update(inningsId, { runs: mockRuns, overs: overs, balls_bowled: overs * 6 });
+      
+      // Set the innings as completed with the mock runs (Syncing via Repo)
+      await InningsRepo.updateScore(inningsId, mockRuns, false, true); // This will sync to Supabase
+      
       // Update match with first_innings_total
-      await db.matches.update(matchId, { first_innings_total: mockRuns });
+      await db.matches.update(matchId, { firstInningsTotal: mockRuns });
+      const fullMatch = await db.matches.get(matchId);
+      if (fullMatch) await supabase.from('matches').upsert(mapMatchPayload(fullMatch));
+
       // Create second innings
       await InningsRepo.create(matchId, bowlingTeamName, battingTeamName, 2);
     } else {
@@ -139,6 +156,17 @@ const MatchSetup: React.FC = () => {
   };
 
   // moryaWarriorPlayers is defined above (from DB is_morya_warrior flag)
+
+  if (step === 'toss') {
+    return (
+      <TossModal 
+        teamA={teamAName} 
+        teamB={teamBName} 
+        onTossComplete={handleTossComplete} 
+        onClose={() => setStep('teams')} 
+      />
+    );
+  }
 
   if (step === 'batting_first') {
     return (
@@ -168,50 +196,8 @@ const MatchSetup: React.FC = () => {
     );
   }
 
-  if (step === 'attendance') {
-    return (
-      <div className="p-4 safe-area-bottom pb-20 fade-in animate-in slide-in-from-bottom-2 duration-300">
-        <h2 className="text-xl font-bold text-gray-900 dark:text-gray-50 mb-2">Morya Warriors — Attendance</h2>
-        <p className="text-gray-500 dark:text-gray-400 mb-6">Mark players present for today's match.</p>
+  // Attendance step removed
 
-        <Card className="p-4 mb-6">
-          <div className="space-y-2">
-            {moryaWarriorPlayers.map(player => {
-              const present = presentPlayers.includes(player.id);
-              return (
-                <button
-                  key={player.id}
-                  onClick={() => toggleAttendance(player.id)}
-                  className={`w-full flex items-center justify-between p-4 rounded-xl border transition-all ${present
-                    ? 'bg-primary-50 dark:bg-primary-900/10 border-primary-200 dark:border-primary-800 text-primary-700 dark:text-primary-400 shadow-sm'
-                    : 'bg-white dark:bg-gray-800 border-gray-100 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:border-gray-200'
-                    }`}
-                >
-                  <span className="font-bold">{player.name}</span>
-                  {present ? (
-                    <CheckCircle2 size={24} className="text-primary-500 animate-in zoom-in duration-200" />
-                  ) : (
-                    <Circle size={24} className="text-gray-300 dark:text-gray-600" />
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        </Card>
-
-        <div className="text-center text-sm text-gray-500 mb-4">
-          {presentPlayers.length} of {moryaWarriorPlayers.length} present
-        </div>
-
-        <div className="fixed bottom-[80px] left-4 right-4 z-30 space-y-2">
-          <Button onClick={() => handleStartMatch()} fullWidth size="xl" className="shadow-lg shadow-primary-500/30">
-            Start Match
-          </Button>
-          <Button variant="ghost" fullWidth onClick={() => setStep('batting_first')}>← Back</Button>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="p-4 safe-area-bottom pb-20">
@@ -286,9 +272,9 @@ const MatchSetup: React.FC = () => {
           </Button>
         </div>
 
-        {searchQuery.trim() && filteredPlayers.length > 0 && (
-          <div className="flex gap-2 flex-wrap mb-4 bg-gray-50 dark:bg-gray-900 p-2 rounded-lg border border-gray-200 dark:border-gray-700">
-            {filteredPlayers.slice(0, 5).map(p => (
+        {filteredPlayers.length > 0 && (
+          <div className="flex gap-2 flex-wrap mb-4 bg-gray-50 dark:bg-gray-900 p-2 rounded-lg border border-gray-200 dark:border-gray-700 max-h-48 overflow-y-auto">
+            {filteredPlayers.map(p => (
               <button
                 key={p.id}
                 onClick={() => handleSelectExisting(p)}

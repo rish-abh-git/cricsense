@@ -2,19 +2,23 @@ import React from 'react';
 import { db } from '../database/db';
 import Card from '../components/Card';
 import Button from '../components/Button';
-import { AlertTriangle, Database, Moon, Sun, Monitor, Palette } from 'lucide-react';
+import { AlertTriangle, Database, Moon, Sun, Monitor, Palette, Users, Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useTheme } from '../contexts/ThemeContext';
 import { exportData, importData } from '../utils/dataUtils';
 import { Download, Upload } from 'lucide-react';
+import { useLiveQuery } from 'dexie-react-hooks';
 import Modal from '../components/Modal';
 import { useToast } from '../components/Toast';
 import { APP_VERSION } from '../version';
+import { clearCloudData } from '../database/syncService';
 
 const Settings: React.FC = () => {
   const navigate = useNavigate();
   const { theme, setTheme } = useTheme();
   const { showToast } = useToast();
+  const [showPlayerManager, setShowPlayerManager] = React.useState(false);
+  const allPlayers = useLiveQuery(() => db.players.toArray()) || [];
 
   const [modalConfig, setModalConfig] = React.useState<{
     isOpen: boolean;
@@ -40,6 +44,7 @@ const Settings: React.FC = () => {
       type: 'danger',
       onConfirm: async () => {
         try {
+          await clearCloudData();
           await db.transaction('rw', [db.matches, db.innings, db.balls, db.players, db.attendance], async () => {
             await db.matches.clear();
             await db.innings.clear();
@@ -47,7 +52,7 @@ const Settings: React.FC = () => {
             await db.players.clear();
             await db.attendance.clear();
           });
-          showToast('All data has been cleared', 'success');
+          showToast('Local and Cloud data cleared', 'success');
           navigate('/');
         } catch (err) {
           console.error(err);
@@ -66,9 +71,10 @@ const Settings: React.FC = () => {
       type: 'info',
       onConfirm: async () => {
         try {
+          await clearCloudData();
           const { seedDatabase } = await import('../utils/seedData');
           await seedDatabase();
-          showToast('Dummy data seeded successfully', 'success');
+          showToast('Cloud cleared and dummy data seeded', 'success');
           setTimeout(() => {
             window.location.href = '/';
           }, 1500);
@@ -211,6 +217,23 @@ const Settings: React.FC = () => {
           </div>
         </Card>
 
+        <Card className="p-5 mb-4 border-l-4 border-l-orange-500 bg-orange-50 dark:bg-orange-900/10 dark:border-l-orange-600">
+          <div className="flex gap-3 mb-4">
+            <div className="text-orange-500 mt-0.5">
+              <Users size={24} />
+            </div>
+            <div>
+              <h3 className="font-bold text-orange-900 dark:text-orange-100">Manage Players</h3>
+              <p className="text-sm text-orange-700 dark:text-orange-300 mt-1 leading-relaxed">
+                Delete individual players and their data permanently from the database.
+              </p>
+            </div>
+          </div>
+          <Button variant="outline" fullWidth onClick={() => setShowPlayerManager(true)}>
+            View & Delete Players
+          </Button>
+        </Card>
+
         <Card className="p-5 border-l-4 border-l-red-500 bg-red-50 dark:bg-red-900/10 dark:border-l-red-600">
           <div className="flex gap-3 mb-4">
             <div className="text-red-500 mt-0.5">
@@ -246,6 +269,49 @@ const Settings: React.FC = () => {
         onConfirm={modalConfig.onConfirm}
         type={modalConfig.type}
       />
+
+      {showPlayerManager && (
+        <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-gray-800 w-full max-w-sm rounded-3xl p-5 max-h-[80vh] flex flex-col animate-in zoom-in duration-200">
+            <h3 className="text-xl font-bold text-gray-900 dark:text-gray-50 mb-4">Manage Players</h3>
+            <div className="flex-1 overflow-y-auto space-y-2 mb-4 scrollbar-hide">
+              {allPlayers.length === 0 ? (
+                <p className="text-center text-gray-500 py-4">No players found.</p>
+              ) : (
+                allPlayers.map(p => (
+                  <div key={p.id} className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-900 rounded-xl border border-gray-100 dark:border-gray-700">
+                    <span className="font-semibold text-gray-800 dark:text-gray-200">{p.name}</span>
+                    <button 
+                      onClick={async () => {
+                        if (p.is_morya_warrior) {
+                          setModalConfig({
+                            isOpen: true,
+                            title: 'Delete Morya Warrior?',
+                            message: `Are you sure you want to delete ${p.name}? They will be removed from your registry.`,
+                            type: 'danger',
+                            confirmLabel: 'Delete',
+                            onConfirm: async () => {
+                              await db.players.delete(p.id);
+                              showToast(`${p.name} deleted.`, 'success');
+                            }
+                          });
+                        } else {
+                          await db.players.delete(p.id);
+                          showToast(`${p.name} deleted.`, 'success');
+                        }
+                      }}
+                      className="text-red-500 hover:text-red-700 bg-red-50 dark:bg-red-900/10 p-2 rounded-lg transition-colors"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+            <Button variant="ghost" fullWidth onClick={() => setShowPlayerManager(false)}>Close</Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
