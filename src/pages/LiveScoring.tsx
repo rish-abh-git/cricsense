@@ -165,7 +165,15 @@ const LiveScoring: React.FC = () => {
     }
   }, [match?.id, match?.status, isMatchComplete]);
 
-  if (!match || !activeInnings) return <div className="p-4 text-center">Loading match...</div>;
+  if (!match || !activeInnings) return (
+    <div className="p-4 flex flex-col items-center justify-center h-screen bg-gray-50 dark:bg-gray-900">
+      <div className="w-16 h-16 bg-primary-100 dark:bg-primary-900/50 rounded-full flex items-center justify-center mb-4 animate-pulse">
+        <div className="w-10 h-10 border-4 border-primary-600 border-t-transparent rounded-full animate-spin"></div>
+      </div>
+      <p className="text-gray-600 dark:text-gray-400 font-bold uppercase tracking-widest text-xs">CricSense</p>
+      <p className="text-[10px] text-gray-400 dark:text-gray-600 font-medium mt-8 opacity-50">Made by Rishabh Masani</p>
+    </div>
+  );
 
   const battingTeamPlayers = allPlayers.filter(p =>
     (activeInnings.batting_team === match.teamA ? match.teamAPlayers : (match.teamBPlayers || [])).includes(p.id)
@@ -216,7 +224,9 @@ const LiveScoring: React.FC = () => {
   };
 
 
-  const handleScoreBall = async (runs: number, extra: ExtraType = 'none', isWicket: boolean = false, wicketType: WicketType = 'none', outPlayerId?: string, fielderId?: string) => {
+  const handleScoreBall = async (runs: number, extra: ExtraType = 'none', isWicket: boolean = false, wicketType: WicketType = 'none', outPlayerId?: string, fielderId?: string, noStrikeChange: boolean = false) => {
+    if (isMatchComplete || isInningsComplete) return; // Prevent fast clicking
+
     if (!striker || !nonStriker || !bowler) {
       showToast("Missing players. Please select them manually.", "info");
       setShowPlayerSelectModal({ type: !striker ? 'striker' : (!nonStriker ? 'non_striker' : 'bowler'), open: true });
@@ -252,38 +262,14 @@ const LiveScoring: React.FC = () => {
       fielder_id: fielderId
     };
 
-    await BallRepo.add(ball);
-
-    // End of over logic - swap strike and prompt for new bowler
-    if (nextBallNumber === 6 && isLegal) {
-      await db.innings.update(activeInnings.id, {
-        striker_id: activeInnings.non_striker_id,
-        non_striker_id: activeInnings.striker_id,
-        bowler_id: undefined
-      });
-    } else {
-      // Normal rotation
-      if (runs % 2 !== 0) {
-        await db.innings.update(activeInnings.id, {
-          striker_id: activeInnings.non_striker_id,
-          non_striker_id: activeInnings.striker_id
-        });
-      }
-    }
-
-    // Wicket rotation
-    if (isWicket && outPlayerId === activeInnings.striker_id) {
-      await db.innings.update(activeInnings.id, { striker_id: undefined });
-    } else if (isWicket && outPlayerId === activeInnings.non_striker_id) {
-      await db.innings.update(activeInnings.id, { non_striker_id: undefined });
-    }
+    await BallRepo.add(ball, noStrikeChange);
 
     setShowWicketModal(false);
     setSelectedWicketType(null);
     setShowFielderSelectModal(false);
     setPendingExtraRunOut(null);
 
-    // Show undo snackbar (feature 2.9)
+    // Show undo snackbar
     showSnackbar();
   };
 
@@ -355,17 +341,9 @@ const LiveScoring: React.FC = () => {
 
   const handleRevertToBall = async () => {
     if (!revertBall) return;
-    setModalConfig({
-      isOpen: true,
-      title: 'Revert Match to This Ball?',
-      message: `All balls after Over ${revertBall.over_number}.${revertBall.ball_number} will be deleted. This cannot be undone.`,
-      confirmLabel: 'Revert',
-      type: 'danger',
-      onConfirm: async () => {
-        await BallRepo.revertToBall(activeInnings.id, revertBall.id);
-        setRevertBall(null);
-      }
-    });
+    await BallRepo.revertToBall(activeInnings.id, revertBall.id);
+    setRevertBall(null);
+    showToast("Match reverted successfully", "success");
   };
 
   const handleManualEndMatch = async () => {
@@ -543,7 +521,13 @@ const LiveScoring: React.FC = () => {
                 </div>
                 <div
                   className={`flex justify-between items-center py-1 ${isAdmin ? 'cursor-pointer active:bg-gray-50 dark:bg-gray-900' : ''}`}
-                  onClick={() => isAdmin && setShowPlayerSelectModal({ type: 'striker', open: true })}
+                  onClick={() => {
+                    if (isAdmin) {
+                      if (!striker || window.confirm(`Do you want to replace/retire ${striker.name}?`)) {
+                        setShowPlayerSelectModal({ type: 'striker', open: true });
+                      }
+                    }
+                  }}
                 >
                   <span className="font-bold text-gray-900 dark:text-gray-50 truncate">
                     {striker?.name || 'Select Striker'} <span className="text-amber-500">*</span>
@@ -552,7 +536,13 @@ const LiveScoring: React.FC = () => {
                 </div>
                 <div
                   className={`flex justify-between items-center py-1 text-gray-600 dark:text-gray-300 ${isAdmin ? 'cursor-pointer active:bg-gray-50 dark:bg-gray-900' : ''}`}
-                  onClick={() => isAdmin && setShowPlayerSelectModal({ type: 'non_striker', open: true })}
+                  onClick={() => {
+                    if (isAdmin) {
+                      if (!nonStriker || window.confirm(`Do you want to replace/retire ${nonStriker.name}?`)) {
+                        setShowPlayerSelectModal({ type: 'non_striker', open: true });
+                      }
+                    }
+                  }}
                 >
                   <span className="font-medium truncate">{nonStriker?.name || 'Select Non-Striker'}</span>
                   {nStrStats && <span className="text-sm">{nStrStats.runs}({nStrStats.ballsFaced})</span>}
@@ -585,6 +575,18 @@ const LiveScoring: React.FC = () => {
                   <Button variant="primary" className="h-14 text-lg font-bold rounded-xl bg-blue-500 hover:bg-blue-600" onClick={() => handleScoreBall(4)}>4</Button>
                   <Button variant="primary" className="h-14 text-lg font-bold rounded-xl" onClick={() => handleScoreBall(6)}>6</Button>
                   <Button variant="danger" className="h-14 text-lg font-bold rounded-xl col-span-2" onClick={() => setShowWicketModal(true)}>WICKET</Button>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 mb-2">
+                  <Button variant="secondary" className="h-12 font-bold rounded-xl bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 border-indigo-100 dark:border-indigo-800" onClick={() => handleScoreBall(1, 'none', false, 'none', undefined, undefined, true)}>1d</Button>
+                  <Button variant="secondary" className="h-12 font-bold rounded-xl bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 border-indigo-100 dark:border-indigo-800" onClick={() => handleScoreBall(2, 'none', false, 'none', undefined, undefined, true)}>2d</Button>
+                  <Button variant="secondary" className="h-12 font-bold rounded-xl bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 border-indigo-100 dark:border-indigo-800" onClick={() => {
+                    const r = prompt("Enter declared runs:");
+                    if (r !== null) {
+                      const runs = parseInt(r);
+                      if (!isNaN(runs)) handleScoreBall(runs, 'none', false, 'none', undefined, undefined, true);
+                    }
+                  }}>Declare...</Button>
                 </div>
 
                 <div className="grid grid-cols-3 gap-2 mb-2">
@@ -712,6 +714,12 @@ const LiveScoring: React.FC = () => {
           <div className="bg-white dark:bg-gray-800 w-full max-w-sm rounded-t-3xl sm:rounded-3xl p-5 pb-8 max-h-[80vh] overflow-y-auto animate-in slide-in-from-bottom-10 sm:zoom-in duration-200">
             <h3 className="text-xl font-bold text-gray-900 dark:text-gray-50 mb-4">Select Fielder</h3>
             <div className="space-y-2">
+              <button
+                onClick={() => handleScoreBall(0, 'none', true, selectedWicketType!, selectedWicketType === 'run_out' ? (Math.random() > 0.5 ? striker?.id : nonStriker?.id) : striker?.id, undefined)}
+                className="w-full py-3 px-4 rounded-xl text-left font-bold bg-primary-50 dark:bg-primary-900/20 border-2 border-primary-200 dark:border-primary-800 text-primary-700 dark:text-primary-300 active:bg-primary-100"
+              >
+                👤 Unknown / Skip Fielder
+              </button>
               {bowlingTeamPlayers.map(p => (
                 <button
                   key={p.id}
@@ -773,24 +781,6 @@ const LiveScoring: React.FC = () => {
               }} size="sm">Add</Button>
             </div>
 
-            <Button
-              variant="secondary"
-              fullWidth
-              className="mb-4 py-3 bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-800"
-              onClick={() => {
-                const available = (showPlayerSelectModal.type === 'bowler' ? bowlingTeamPlayers : battingTeamPlayers)
-                  .filter(p => p.id !== activeInnings.striker_id && p.id !== activeInnings.non_striker_id && p.id !== activeInnings.bowler_id);
-                if (available.length > 0) {
-                  const picked = available[Math.floor(Math.random() * available.length)];
-                  setNewPlayerName(picked.name);
-                } else {
-                  showToast("No other players available to suggest.", "info");
-                }
-              }}
-            >
-              🎲 Suggest Random Player
-            </Button>
-
             <div className="space-y-2">
               {(showPlayerSelectModal.type === 'bowler' ? bowlingTeamPlayers : battingTeamPlayers).map(p => (
                 <button
@@ -840,6 +830,27 @@ const LiveScoring: React.FC = () => {
                   +{r}
                 </button>
               ))}
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 mb-4">
+               <button
+                  onClick={() => {
+                    handleScoreBall(1, showExtraRunsModal, false, 'none', undefined, undefined, true);
+                    setShowExtraRunsModal(null);
+                  }}
+                  className="py-2.5 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 rounded-xl font-bold border border-indigo-200 dark:border-indigo-800 text-xs"
+                >
+                  +1d
+                </button>
+                <button
+                  onClick={() => {
+                    handleScoreBall(2, showExtraRunsModal, false, 'none', undefined, undefined, true);
+                    setShowExtraRunsModal(null);
+                  }}
+                  className="py-2.5 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 rounded-xl font-bold border border-indigo-200 dark:border-indigo-800 text-xs"
+                >
+                  +2d
+                </button>
             </div>
 
             {/* Run Out on extra (feature 2.1) */}
@@ -947,77 +958,6 @@ const LiveScoring: React.FC = () => {
         </div>
       )}
 
-      {/* Edit Ball Modal (feature 2.2) */}
-      {editingBall && (
-        <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4 backdrop-blur-sm">
-          <Card className="w-full max-w-md p-6 animate-in zoom-in duration-200 shadow-2xl">
-            <h3 className="text-xl font-bold text-gray-900 dark:text-gray-50 mb-4">Edit Ball {editingBall.over_number}.{editingBall.ball_number}</h3>
-            
-            <div className="space-y-4 mb-6">
-              <div>
-                <label className="text-sm font-semibold text-gray-700 dark:text-gray-200 block mb-2">Runs Scored (Bat)</label>
-                <div className="flex gap-2">
-                  {[0, 1, 2, 3, 4, 6].map(r => (
-                    <button
-                      key={r}
-                      onClick={() => setEditScore(r)}
-                      className={`flex-1 py-2 rounded-xl font-bold border transition-colors ${editScore === r ? 'bg-primary-600 text-white border-primary-600' : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 border-gray-200 dark:border-gray-700'}`}
-                    >
-                      {r}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="text-sm font-semibold text-gray-700 dark:text-gray-200 block mb-2">Extras</label>
-                <div className="flex flex-wrap gap-2">
-                  {['none', 'wide', 'no_ball', 'bye', 'leg_bye'].map(e => (
-                    <button
-                      key={e}
-                      onClick={() => setEditExtra(e as ExtraType)}
-                      className={`flex-1 min-w-[70px] py-1.5 text-xs rounded-lg font-bold border transition-colors capitalize ${editExtra === e ? 'bg-primary-600 text-white border-primary-600' : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 border-gray-200 dark:border-gray-700'}`}
-                    >
-                      {e.replace('_', ' ')}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="text-sm font-semibold text-gray-700 dark:text-gray-200 block mb-2">Wicket?</label>
-                <div className="flex items-center justify-between bg-gray-100 dark:bg-gray-800 p-3 rounded-xl border border-gray-200 dark:border-gray-700">
-                  <span className="font-medium text-gray-800 dark:text-gray-100">Is Wicket</span>
-                  <button 
-                    onClick={() => setEditIsWicket(!editIsWicket)}
-                    className={`w-12 h-6 rounded-full relative transition-colors ${editIsWicket ? 'bg-red-500' : 'bg-gray-300 dark:bg-gray-600'}`}
-                  >
-                    <div className={`w-5 h-5 bg-white rounded-full absolute top-0.5 transition-transform ${editIsWicket ? 'right-0.5' : 'left-0.5'}`}></div>
-                  </button>
-                </div>
-                {editIsWicket && (
-                  <div className="flex flex-wrap gap-2 mt-3">
-                    {WICKET_TYPES.map(w => (
-                      <button
-                        key={w}
-                        onClick={() => setEditWicketType(w)}
-                        className={`px-3 py-1.5 text-xs rounded-lg font-bold border transition-colors capitalize ${editWicketType === w ? 'bg-red-500 text-white border-red-500' : 'bg-red-50 dark:bg-gray-800 text-red-600 dark:text-red-400 border-red-200 dark:border-red-800'}`}
-                      >
-                        {w.replace('_', ' ')}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="flex gap-3">
-              <Button variant="ghost" fullWidth onClick={() => setEditingBall(null)}>Cancel</Button>
-              <Button variant="primary" fullWidth onClick={saveEditedBall}>Save Changes</Button>
-            </div>
-          </Card>
-        </div>
-      )}
 
       {/* Tap Mode */}
       {isTapMode && (
@@ -1068,13 +1008,13 @@ const LiveScoring: React.FC = () => {
               <div>
                 <label className="text-xs font-bold text-gray-500 uppercase mb-2 block">Extra Type</label>
                 <div className="grid grid-cols-3 gap-2">
-                  {['none', 'wide', 'no_ball'].map(e => (
+                  {['none', 'wide', 'no_ball', 'bye', 'leg_bye'].map(e => (
                     <button
                       key={e}
                       onClick={() => setEditExtra(e as ExtraType)}
-                      className={`py-2 rounded-lg font-bold text-xs border transition-all capitalize ${editExtra === e ? 'bg-amber-500 border-amber-500 text-white shadow-md' : 'bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200'}`}
+                      className={`py-2 rounded-lg font-bold text-[10px] border transition-all capitalize ${editExtra === e ? 'bg-amber-500 border-amber-500 text-white shadow-md' : 'bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200'}`}
                     >
-                      {e}
+                      {e.replace('_', ' ')}
                     </button>
                   ))}
                 </div>

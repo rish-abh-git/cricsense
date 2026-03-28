@@ -30,6 +30,7 @@ const MatchSetup: React.FC = () => {
   const [teamAPlayers, setTeamAPlayers] = useState<Player[]>([]);
   const [teamBPlayers, setTeamBPlayers] = useState<Player[]>([]);
   const [activeTeamSelection, setActiveTeamSelection] = useState<'A' | 'B'>('A');
+  const [showQuickToss, setShowQuickToss] = useState(false);
 
   // Feature 2.5 — Batting first
   const [battingFirst, setBattingFirst] = useState<string>('');
@@ -90,7 +91,7 @@ const MatchSetup: React.FC = () => {
       showToast("Please enter names for both teams.", "error");
       return;
     }
-    setStep('toss');
+    setStep('batting_first');
   };
 
   const handleTossComplete = (winner: string, decision: 'bat' | 'bowl') => {
@@ -136,7 +137,7 @@ const MatchSetup: React.FC = () => {
       const inningsId = await InningsRepo.create(matchId, battingTeamName, bowlingTeamName, 1);
       
       // Set the innings as completed with the mock runs (Syncing via Repo)
-      await InningsRepo.updateScore(inningsId, mockRuns, false, true); // This will sync to Supabase
+      await InningsRepo.updateScore(inningsId, mockRuns, 'none', false); // New signature: runs, extra_type, isWicket
       
       // Update match with first_innings_total
       await db.matches.update(matchId, { firstInningsTotal: mockRuns });
@@ -201,7 +202,23 @@ const MatchSetup: React.FC = () => {
 
   return (
     <div className="p-4 safe-area-bottom pb-20">
-      <h2 className="text-xl font-bold text-gray-900 dark:text-gray-50 mb-4">Match Setup</h2>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-xl font-bold text-gray-900 dark:text-gray-50">Match Setup</h2>
+        <button 
+          onClick={() => setShowQuickToss(true)}
+          className="p-2 bg-primary-50 dark:bg-primary-900/20 text-primary-600 dark:text-primary-400 rounded-xl hover:bg-primary-100 transition-colors flex items-center gap-2 font-semibold text-sm"
+          title="Random Toss"
+        >
+          <PlusCircle size={18} className="rotate-45" /> Quick Toss
+        </button>
+      </div>
+
+      {showQuickToss && (
+        <TossModal 
+          onTossComplete={() => {}} 
+          onClose={() => setShowQuickToss(false)} 
+        />
+      )}
 
       <div className="space-y-4 mb-6">
         <div className="grid grid-cols-2 gap-3">

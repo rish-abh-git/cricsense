@@ -11,14 +11,14 @@ export const PlayerRepo = {
     const id = uuidv4();
     const payload = { id, name: formatName(name) };
     await db.players.add(payload);
-    await supabase.from('players').upsert(payload);
+    supabase.from('players').upsert(payload).then();
     return id;
   },
   addMultiple: async (names: string[]) => {
     const formatName = (n: string) => n.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
     const players = names.map(name => ({ id: uuidv4(), name: formatName(name) }));
     await db.players.bulkAdd(players);
-    await supabase.from('players').upsert(players);
+    supabase.from('players').upsert(players).then();
   }
 };
 
@@ -42,16 +42,15 @@ export const MatchRepo = {
       optedTo
     };
     await db.matches.add(payload);
-    await supabase.from('matches').upsert(mapMatchPayload(payload));
+    supabase.from('matches').upsert(mapMatchPayload(payload)).then();
     return mId;
   },
   updateStatus: async (id: string, status: 'ongoing' | 'completed', winner?: string) => {
     const updateIdx = { status, winner };
     await db.matches.update(id, updateIdx);
-    const full = await db.matches.get(id);
-    if (full) {
-      await supabase.from('matches').upsert(mapMatchPayload(full));
-    }
+    db.matches.get(id).then(full => {
+      if (full) supabase.from('matches').upsert(mapMatchPayload(full)).then();
+    });
   },
   addPlayerToTeam: async (matchId: string, team: 'A' | 'B', playerId: string) => {
     const match = await db.matches.get(matchId);
@@ -63,10 +62,9 @@ export const MatchRepo = {
       update.teamBPlayers = [...(match.teamBPlayers || []), playerId];
     }
     await db.matches.update(matchId, update);
-    const full = await db.matches.get(matchId);
-    if (full) {
-      await supabase.from('matches').upsert(mapMatchPayload(full));
-    }
+    db.matches.get(matchId).then(full => {
+      if (full) supabase.from('matches').upsert(mapMatchPayload(full)).then();
+    });
   }
 };
 
@@ -86,37 +84,88 @@ export const InningsRepo = {
       innings_number
     };
     await db.innings.add(payload);
-    await supabase.from('innings').upsert(payload);
+    supabase.from('innings').upsert(payload).then();
     return iId;
   },
-  updateScore: async (id: string, runs: number, isWicket: boolean, isLegalDelivery: boolean) => {
-    const innings = await db.innings.get(id);
-    if (!innings) return;
+  updateScore: async (id: string, runs: number, extra_type: string, isWicket: boolean, outPlayerId?: string, noStrikeChange: boolean = false) => {
+    // IMPORTANT: We use get+put instead of .update() because Dexie's .update()
+    // silently ignores undefined values. We need to CLEAR bowler_id/striker_id
+    // by deleting the property from the record.
+    const record = await db.innings.get(id);
+    if (!record) return;
     
-    const update = {
-      runs: innings.runs + runs,
-      wickets: innings.wickets + (isWicket ? 1 : 0),
-      balls_bowled: innings.balls_bowled + (isLegalDelivery ? 1 : 0),
-      overs: Math.floor((innings.balls_bowled + (isLegalDelivery ? 1 : 0)) / 6) + ((innings.balls_bowled + (isLegalDelivery ? 1 : 0)) % 6) / 10
-    };
-    await db.innings.update(id, update);
-    const full = await db.innings.get(id);
-    if (full) {
-      await supabase.from('innings').upsert(full);
+    const isLegalDelivery = extra_type !== 'wide' && extra_type !== 'no_ball';
+    const extraRuns = (extra_type === 'wide' || extra_type === 'no_ball') ? 1 : 0;
+    const totalRuns = runs + extraRuns;
+
+    // Calculate rotation starting from current state
+    let newStrikerId: string | undefined = record.striker_id;
+    let newNonStrikerId: string | undefined = record.non_striker_id;
+    let clearBowler = false;
+
+    // 1. Swap for odd runs (unless noStrikeChange)
+    if (runs % 2 !== 0 && !noStrikeChange) {
+      const temp = newStrikerId;
+      newStrikerId = newNonStrikerId;
+      newNonStrikerId = temp;
     }
+
+    // 2. Over end logic
+    const nextBallsBowled = record.balls_bowled + (isLegalDelivery ? 1 : 0);
+    const isOverEnd = nextBallsBowled % 6 === 0 && isLegalDelivery && nextBallsBowled > 0;
+    
+    if (isOverEnd) {
+      const temp = newStrikerId;
+      newStrikerId = newNonStrikerId;
+      newNonStrikerId = temp;
+      clearBowler = true;
+    }
+
+    // 3. Wicket logic — clear the out player's position
+    if (isWicket && outPlayerId) {
+      if (outPlayerId === newStrikerId) {
+        newStrikerId = undefined;
+      } else if (outPlayerId === newNonStrikerId) {
+        newNonStrikerId = undefined;
+      }
+    }
+
+    const updateObj: any = {
+      runs: record.runs + totalRuns,
+      wickets: record.wickets + (isWicket ? 1 : 0),
+      balls_bowled: nextBallsBowled,
+      overs: Math.floor(nextBallsBowled / 6) + (nextBallsBowled % 6) / 10
+    };
+
+    if (newStrikerId !== undefined) updateObj.striker_id = newStrikerId;
+    else updateObj.striker_id = null;
+
+    if (newNonStrikerId !== undefined) updateObj.non_striker_id = newNonStrikerId;
+    else updateObj.non_striker_id = null;
+
+    if (clearBowler) updateObj.bowler_id = null;
+
+    await db.innings.update(id, updateObj);
+    
+    // Non-blocking Supabase sync
+    db.innings.get(id).then(fullRecord => {
+      if (fullRecord) supabase.from('innings').upsert(fullRecord).then();
+    });
   },
   updatePlayers: async (id: string, update: { striker_id?: string, non_striker_id?: string, bowler_id?: string }) => {
-    await db.innings.update(id, update);
-    const full = await db.innings.get(id);
-    if (full) {
-      await supabase.from('innings').upsert(full);
-    }
+    const record = await db.innings.get(id);
+    if (!record) return;
+    if (update.striker_id !== undefined) record.striker_id = update.striker_id;
+    if (update.non_striker_id !== undefined) record.non_striker_id = update.non_striker_id;
+    if (update.bowler_id !== undefined) record.bowler_id = update.bowler_id;
+    await db.innings.put(record);
+    supabase.from('innings').upsert(record).then();
   }
 };
 
 export const BallRepo = {
   getByInnings: (inningsId: string) => db.balls.where('innings_id').equals(inningsId).toArray(),
-  add: async (ball: Omit<Ball, 'id'>) => {
+  add: async (ball: Omit<Ball, 'id'>, noStrikeChange: boolean = false) => {
     const innings = await db.innings.get(ball.innings_id);
     const id = uuidv4();
     const payload = {
@@ -128,10 +177,11 @@ export const BallRepo = {
       snapshot_bowler_id: innings?.bowler_id,
     };
     await db.balls.add(payload);
-    await supabase.from('balls').upsert(payload);
     
-    const isLegal = ball.extra_type !== 'wide' && ball.extra_type !== 'no_ball';
-    await InningsRepo.updateScore(ball.innings_id, ball.runs + ball.extra_runs, ball.is_wicket, isLegal);
+    // Non-blocking Supabase sync
+    supabase.from('balls').upsert(payload).then();
+    
+    await InningsRepo.updateScore(ball.innings_id, ball.runs, ball.extra_type || 'none', ball.is_wicket, ball.player_out_id, noStrikeChange);
     return id;
   },
   undoLastBall: async (inningsId: string) => {
@@ -162,12 +212,13 @@ export const BallRepo = {
         bowler_id: lastBall.snapshot_bowler_id,
       };
       await db.innings.update(inningsId, update);
-      const fullInnings = await db.innings.get(inningsId);
-      if (fullInnings) await supabase.from('innings').upsert(fullInnings);
+      db.innings.get(inningsId).then(fullInnings => {
+        if (fullInnings) supabase.from('innings').upsert(fullInnings).then();
+      });
     }
     
     await db.balls.delete(lastBall.id);
-    await supabase.from('balls').delete().eq('id', lastBall.id);
+    supabase.from('balls').delete().eq('id', lastBall.id).then();
   },
   revertToBall: async (inningsId: string, targetBallId: string) => {
     const balls = await db.balls.where('innings_id').equals(inningsId).toArray();
@@ -211,11 +262,11 @@ export const BallRepo = {
       };
       await db.innings.update(inningsId, update);
       const fullInnings = await db.innings.get(inningsId);
-      if (fullInnings) await supabase.from('innings').upsert(fullInnings);
+      if (fullInnings) supabase.from('innings').upsert(fullInnings).then();
     }
 
     await db.balls.bulkDelete(ballsToDelete.map(b => b.id));
-    await supabase.from('balls').delete().in('id', ballsToDelete.map(b => b.id));
+    supabase.from('balls').delete().in('id', ballsToDelete.map(b => b.id)).then();
   }
 };
 
@@ -226,11 +277,12 @@ export const AttendanceRepo = {
     const existing = await db.attendance.where({ date, player_id }).first();
     if (existing) {
       await db.attendance.delete(existing.id);
-      await supabase.from('attendance').delete().eq('id', existing.id);
+      supabase.from('attendance').delete().eq('id', existing.id).then();
     } else {
       const id = uuidv4();
-      await db.attendance.add({ id, date, player_id });
-      await supabase.from('attendance').upsert({ id, date, player_id });
+      const payload = { id, date, player_id };
+      await db.attendance.add(payload);
+      supabase.from('attendance').upsert(payload).then();
     }
   }
 };

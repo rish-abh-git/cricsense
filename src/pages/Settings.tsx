@@ -280,7 +280,25 @@ const Settings: React.FC = () => {
               ) : (
                 allPlayers.map(p => (
                   <div key={p.id} className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-900 rounded-xl border border-gray-100 dark:border-gray-700">
-                    <span className="font-semibold text-gray-800 dark:text-gray-200">{p.name}</span>
+                    <div className="flex flex-col">
+                      <span className="font-semibold text-gray-800 dark:text-gray-200">{p.name}</span>
+                      <label className="flex items-center gap-2 mt-1 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={!!p.is_morya_warrior}
+                          onChange={async (e) => {
+                            try {
+                              await db.players.update(p.id, { is_morya_warrior: e.target.checked });
+                              showToast(`${p.name} status updated.`, 'success');
+                            } catch (error) {
+                              showToast(`Failed to update ${p.name}.`, 'error');
+                            }
+                          }}
+                          className="w-3.5 h-3.5 rounded text-primary-600 focus:ring-primary-500"
+                        />
+                        <span className="text-xs text-gray-500 font-medium select-none">Morya Warrior</span>
+                      </label>
+                    </div>
                     <button 
                       onClick={async () => {
                         if (p.is_morya_warrior) {

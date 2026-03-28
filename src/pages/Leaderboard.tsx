@@ -18,7 +18,8 @@ const Leaderboard: React.FC = () => {
   const filteredBalls = useMemo(() => balls.filter(b => validInningsIds.has(b.innings_id)), [balls, validInningsIds]);
 
   const rankings = useMemo(() => {
-    if (!players.length || !filteredBalls.length) return { topGully: [], topBatsmen: [], topBowlers: [] };
+    const moryaPlayers = players.filter(p => p.is_morya_warrior);
+    if (!moryaPlayers.length || !filteredBalls.length) return { topGully: [], topBatsmen: [], topBowlers: [] };
 
     const statsMap = new Map<string, {
       runs: number,
@@ -31,7 +32,7 @@ const Leaderboard: React.FC = () => {
       dotsFaced: number
     }>();
 
-    players.forEach(p => {
+    moryaPlayers.forEach(p => {
       statsMap.set(p.id, { runs: 0, wickets: 0, ballsFaced: 0, legalBallsBowled: 0, runsGiven: 0, catches: 0, runouts: 0, dotsFaced: 0 });
     });
 
@@ -62,13 +63,13 @@ const Leaderboard: React.FC = () => {
       }
     });
 
-    const topGully = players.map(p => {
+    const topGully = moryaPlayers.map(p => {
       const s = statsMap.get(p.id)!;
       const score = s.runs + (20 * s.wickets) + (10 * s.catches) + (10 * s.runouts) - s.dotsFaced;
       return { id: p.id, name: p.name, score };
     }).sort((a, b) => b.score - a.score).slice(0, 10);
 
-    const topBatsmen = players.map(p => {
+    const topBatsmen = moryaPlayers.map(p => {
       const s = statsMap.get(p.id)!;
       return {
         id: p.id,
@@ -78,7 +79,7 @@ const Leaderboard: React.FC = () => {
       };
     }).filter(p => p.runs > 0).sort((a, b) => b.runs - a.runs).slice(0, 10);
 
-    const topBowlers = players.map(p => {
+    const topBowlers = moryaPlayers.map(p => {
       const s = statsMap.get(p.id)!;
       const overs = s.legalBallsBowled / 6;
       return {

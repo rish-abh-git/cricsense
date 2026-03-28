@@ -8,6 +8,8 @@ import { Share2, Home, MessageSquareQuote, Trash2 } from 'lucide-react';
 import { generateBallWiseSummary } from '../utils/shareUtils';
 import { useToast } from '../components/Toast';
 import Modal from '../components/Modal';
+import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../database/supabaseClient';
 import type { Ball } from '../database/schema';
 import {
   Chart as ChartJS,
@@ -28,6 +30,7 @@ const MatchSummary: React.FC = () => {
   const { matchId } = useParams();
   const navigate = useNavigate();
   const { showToast } = useToast();
+  const { isAdmin } = useAuth();
 
   const match = useLiveQuery(() => db.matches.get(matchId || ''));
   const innings = useLiveQuery(() => db.innings.where('match_id').equals(matchId || '').toArray());
@@ -166,7 +169,15 @@ const MatchSummary: React.FC = () => {
     };
   }, [match, innings, balls, players]);
 
-  if (!match || !innings || !balls) return <div className="p-4 flex justify-center mt-10">Loading summary...</div>;
+  if (!match || !innings || !balls) return (
+    <div className="p-4 flex flex-col items-center justify-center h-screen bg-gray-50 dark:bg-gray-900">
+      <div className="w-16 h-16 bg-primary-100 dark:bg-primary-900/50 rounded-full flex items-center justify-center mb-4 animate-pulse">
+        <div className="w-10 h-10 border-4 border-primary-600 border-t-transparent rounded-full animate-spin"></div>
+      </div>
+      <p className="text-gray-600 dark:text-gray-400 font-bold uppercase tracking-widest text-xs">CricSense</p>
+      <p className="text-[10px] text-gray-400 dark:text-gray-600 font-medium mt-8 opacity-50">Made by Rishabh Masani</p>
+    </div>
+  );
 
   const getBallTextDisplay = (b: Ball) => {
     let lbl = b.runs.toString();
@@ -255,16 +266,35 @@ const MatchSummary: React.FC = () => {
     });
   };
 
-  const handleArchiveMatch = () => {
+  const handleDeleteMatch = () => {
     setModalConfig({
       isOpen: true,
-      title: 'Delete Match?',
-      message: 'This match will be hidden from your home screen, but its data will be kept in the database if you ever need to re-fetch it. Permanent deletion is not recommended if you want to keep history.',
-      confirmLabel: 'Delete (Archive)',
+      title: 'Permanently Delete Match?',
+      message: 'This will delete the match, all innings, and all ball records. This cannot be undone.',
+      confirmLabel: 'Delete Forever',
       type: 'danger',
       onConfirm: async () => {
-        await db.matches.update(matchId!, { is_archived: true });
-        showToast('Match archived successfully', 'success');
+        // Delete balls
+        const matchInnings = await db.innings.where('match_id').equals(matchId!).toArray();
+        const inningsIds = matchInnings.map(i => i.id);
+        for (const iId of inningsIds) {
+          const inningsBalls = await db.balls.where('innings_id').equals(iId).toArray();
+          await db.balls.bulkDelete(inningsBalls.map(b => b.id));
+          // Non-blocking cloud delete
+          if (inningsBalls.length > 0) {
+            supabase.from('balls').delete().in('id', inningsBalls.map(b => b.id)).then();
+          }
+        }
+        // Delete innings
+        await db.innings.bulkDelete(inningsIds);
+        if (inningsIds.length > 0) {
+          supabase.from('innings').delete().in('id', inningsIds).then();
+        }
+        // Delete match
+        await db.matches.delete(matchId!);
+        supabase.from('matches').delete().eq('id', matchId!).then();
+
+        showToast('Match deleted', 'success');
         navigate('/');
       }
     });
@@ -349,11 +379,13 @@ const MatchSummary: React.FC = () => {
           <Home size={18} /> Back to Home
         </Button>
       </div>
-      <div className="grid grid-cols-1 gap-2 pt-4 border-t dark:border-gray-700">
-        <Button variant="ghost" onClick={handleArchiveMatch} className="flex gap-2.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/10">
-          <Trash2 size={18} /> Delete Match (Keep Data)
-        </Button>
-      </div>
+      {isAdmin && (
+        <div className="grid grid-cols-1 gap-2 pt-4 border-t dark:border-gray-700">
+          <Button variant="ghost" onClick={handleDeleteMatch} className="flex gap-2.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/10">
+            <Trash2 size={18} /> Delete Match
+          </Button>
+        </div>
+      )}
 
       <Modal
         isOpen={modalConfig.isOpen}

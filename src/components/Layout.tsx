@@ -3,6 +3,7 @@ import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { Trophy, Home, BarChart2, ArrowLeft, Settings as SettingsIcon, Medal, Sun, Moon, Users, ArrowRightLeft, LogOut, ShieldAlert } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
+import { APP_VERSION } from '../version';
 
 const Layout: React.FC = () => {
   const navigate = useNavigate();
@@ -29,6 +30,9 @@ const Layout: React.FC = () => {
           <h1 className="text-xl font-bold bg-gradient-to-r from-primary-600 to-primary-500 bg-clip-text text-transparent flex items-center gap-2">
             <Trophy size={20} className="text-primary-500" />
             CricSense
+            {!isAdmin && (
+              <span className="text-[10px] font-medium text-gray-400 dark:text-gray-500 mt-1.5 ml-0.5">v{APP_VERSION}</span>
+            )}
           </h1>
         </div>
         <div className="flex items-center gap-1">
@@ -109,6 +113,11 @@ const Layout: React.FC = () => {
         )}
       </nav>
       )}
+      <div className={`fixed ${isViewOnly ? 'bottom-2' : 'bottom-16'} left-0 right-0 py-1 text-center pointer-events-none z-[60]`}>
+        <p className="text-[9px] text-gray-400 dark:text-gray-600 font-medium opacity-50">
+          Made by Rishabh Masani {isViewOnly && `• v${APP_VERSION}`}
+        </p>
+      </div>
     </div>
   );
 };
