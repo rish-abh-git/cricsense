@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../database/db';
@@ -42,6 +42,24 @@ const MatchSetup: React.FC = () => {
   const [step, setStep] = useState<SetupStep>('teams');
   const [tossWinner, setTossWinner] = useState<string>('');
   const [tossDecision, setTossDecision] = useState<'bat' | 'bowl'>('bat');
+
+  useEffect(() => {
+    const fetchLastMatch = async () => {
+      const match = await db.matches.orderBy('date').last();
+      if (match) {
+        if (teamAPlayers.length === 0) {
+          const aPlayers = await Promise.all(match.teamAPlayers.map(id => db.players.get(id)));
+          setTeamAPlayers(aPlayers.filter(Boolean) as Player[]);
+        }
+        if (teamBPlayers.length === 0 && match.teamBPlayers) {
+          const bPlayers = await Promise.all(match.teamBPlayers.map(id => db.players.get(id)));
+          setTeamBPlayers(bPlayers.filter(Boolean) as Player[]);
+        }
+      }
+    };
+    fetchLastMatch();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const filteredPlayers = allPlayers.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase()) &&
     !teamAPlayers.some(tp => tp.id === p.id) &&

@@ -12,12 +12,18 @@ import Modal from '../components/Modal';
 import { useToast } from '../components/Toast';
 import { APP_VERSION } from '../version';
 import { clearCloudData } from '../database/syncService';
+import { supabase } from '../database/supabaseClient';
 
 const Settings: React.FC = () => {
   const navigate = useNavigate();
   const { theme, setTheme } = useTheme();
   const { showToast } = useToast();
   const [showPlayerManager, setShowPlayerManager] = React.useState(false);
+  const [isClearing, setIsClearing] = React.useState(false);
+  const [isSeeding, setIsSeeding] = React.useState(false);
+  const [isExporting, setIsExporting] = React.useState(false);
+  const [isImporting, setIsImporting] = React.useState(false);
+  const [isDeletingPlayer, setIsDeletingPlayer] = React.useState(false);
   const allPlayers = useLiveQuery(() => db.players.toArray()) || [];
 
   const [modalConfig, setModalConfig] = React.useState<{
@@ -43,20 +49,23 @@ const Settings: React.FC = () => {
       confirmLabel: 'Delete Everything',
       type: 'danger',
       onConfirm: async () => {
+        setIsClearing(true);
         try {
           await clearCloudData();
           await db.transaction('rw', [db.matches, db.innings, db.balls, db.players, db.attendance], async () => {
-            await db.matches.clear();
-            await db.innings.clear();
-            await db.balls.clear();
-            await db.players.clear();
-            await db.attendance.clear();
+             await db.matches.clear();
+             await db.innings.clear();
+             await db.balls.clear();
+             await db.players.clear();
+             await db.attendance.clear();
           });
           showToast('Local and Cloud data cleared', 'success');
           navigate('/');
         } catch (err) {
           console.error(err);
           showToast('Failed to clear data', 'error');
+        } finally {
+          setIsClearing(false);
         }
       }
     });
@@ -70,6 +79,7 @@ const Settings: React.FC = () => {
       confirmLabel: 'Seed Data',
       type: 'info',
       onConfirm: async () => {
+        setIsSeeding(true);
         try {
           await clearCloudData();
           const { seedDatabase } = await import('../utils/seedData');
@@ -81,17 +91,22 @@ const Settings: React.FC = () => {
         } catch (err) {
           console.error(err);
           showToast('Failed to seed data', 'error');
+        } finally {
+          setIsSeeding(false);
         }
       }
     });
   };
 
   const handleExportData = async () => {
+    setIsExporting(true);
     try {
       await exportData();
       showToast('Data exported successfully', 'success');
     } catch (err) {
       showToast('Failed to export data', 'error');
+    } finally {
+      setIsExporting(false);
     }
   };
 
@@ -109,6 +124,7 @@ const Settings: React.FC = () => {
         confirmLabel: 'Import Now',
         type: 'info',
         onConfirm: async () => {
+          setIsImporting(true);
           try {
             await importData(content);
             showToast('Data imported successfully', 'success');
@@ -117,6 +133,8 @@ const Settings: React.FC = () => {
             }, 1500);
           } catch (err) {
             showToast('Import failed. Invalid file format', 'error');
+          } finally {
+            setIsImporting(false);
           }
         }
       });
@@ -179,7 +197,7 @@ const Settings: React.FC = () => {
               </p>
             </div>
           </div>
-          <Button variant="primary" fullWidth onClick={handleSeedData}>
+          <Button variant="primary" fullWidth onClick={handleSeedData} isLoading={isSeeding}>
             Seed Dummy Data
           </Button>
         </Card>
@@ -197,7 +215,7 @@ const Settings: React.FC = () => {
             </div>
           </div>
           <div className="flex gap-3">
-            <Button variant="primary" fullWidth onClick={handleExportData} className="flex-1">
+            <Button variant="primary" fullWidth onClick={handleExportData} className="flex-1" isLoading={isExporting}>
               <Download size={18} className="mr-2 inline" />
               Export
             </Button>
@@ -208,8 +226,9 @@ const Settings: React.FC = () => {
                 onChange={handleImportData}
                 className="absolute inset-0 opacity-0 cursor-pointer w-full h-full z-10"
                 id="import-input"
+                disabled={isImporting}
               />
-              <Button variant="outline" fullWidth className="w-full">
+              <Button variant="outline" fullWidth className="w-full" isLoading={isImporting}>
                 <Upload size={18} className="mr-2 inline" />
                 Import
               </Button>
@@ -247,7 +266,7 @@ const Settings: React.FC = () => {
             </div>
           </div>
 
-          <Button variant="danger" fullWidth onClick={handleClearData}>
+          <Button variant="danger" fullWidth onClick={handleClearData} isLoading={isClearing}>
             Clear All Data
           </Button>
         </Card>
@@ -300,6 +319,7 @@ const Settings: React.FC = () => {
                       </label>
                     </div>
                     <button 
+                      disabled={isDeletingPlayer}
                       onClick={async () => {
                         if (p.is_morya_warrior) {
                           setModalConfig({
@@ -309,16 +329,22 @@ const Settings: React.FC = () => {
                             type: 'danger',
                             confirmLabel: 'Delete',
                             onConfirm: async () => {
+                              setIsDeletingPlayer(true);
+                              await supabase.from('players').delete().eq('id', p.id).then();
                               await db.players.delete(p.id);
                               showToast(`${p.name} deleted.`, 'success');
+                              setIsDeletingPlayer(false);
                             }
                           });
                         } else {
+                          setIsDeletingPlayer(true);
+                          await supabase.from('players').delete().eq('id', p.id).then();
                           await db.players.delete(p.id);
                           showToast(`${p.name} deleted.`, 'success');
+                          setIsDeletingPlayer(false);
                         }
                       }}
-                      className="text-red-500 hover:text-red-700 bg-red-50 dark:bg-red-900/10 p-2 rounded-lg transition-colors"
+                      className="text-red-500 hover:text-red-700 bg-red-50 dark:bg-red-900/10 p-2 rounded-lg transition-colors disabled:opacity-50"
                     >
                       <Trash2 size={16} />
                     </button>

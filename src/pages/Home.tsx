@@ -23,6 +23,36 @@ const Home: React.FC = () => {
     const all = await db.players.toArray();
     return all.filter(p => p.is_morya_warrior).length;
   });
+  const allInnings = useLiveQuery(() => db.innings.toArray()) || [];
+
+  const isMatchFinishedDisplay = (match: any) => {
+    if (match.status === 'completed') return true;
+    const mInnings = allInnings.filter(i => i.match_id === match.id);
+    const i1 = mInnings.find(i => i.innings_number === 1);
+    const i2 = mInnings.find(i => i.innings_number === 2);
+    if (!i1) return false;
+    if (i2 && (i2.wickets >= 10 || i2.overs >= match.overs || i2.runs > i1.runs)) return true;
+    return false;
+  };
+
+  const getMatchWinnerDisplay = (match: any) => {
+    if (match.winner) return `${match.winner} won`;
+    const mInnings = allInnings.filter(i => i.match_id === match.id);
+    const i1 = mInnings.find(i => i.innings_number === 1);
+    const i2 = mInnings.find(i => i.innings_number === 2);
+    if (!i1 || !i2) return null;
+    if (i2.runs > i1.runs) return `${i2.batting_team} won`;
+    if (i2.wickets >= 10 || i2.overs >= match.overs) {
+      if (i1.runs > i2.runs) return `${i1.batting_team} won`;
+      if (i1.runs === i2.runs) return 'Match Tied';
+    }
+    if (match.status === 'completed') {
+       if (i1.runs > i2.runs) return `${i1.batting_team} won`;
+       if (i2.runs > i1.runs) return `${i2.batting_team} won`;
+       return 'Match Tied';
+    }
+    return null;
+  };
 
   const groupedMatches = React.useMemo(() => {
     if (!allMatches) return {};
@@ -120,11 +150,13 @@ const Home: React.FC = () => {
             </div>
           </div>
           <div className="space-y-3">
-            {matches.map(match => (
+            {matches.map(match => {
+              const actuallyCompleted = isMatchFinishedDisplay(match);
+              return (
               <Card key={match.id} className="p-4 active:bg-gray-50 dark:bg-gray-900 cursor-pointer" onClick={() => navigate(`/summary/${match.id}`)}>
                 <div className="flex justify-between items-center mb-2">
-                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${match.status === 'completed' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
-                    {match.status}
+                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${actuallyCompleted ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                    {actuallyCompleted ? 'completed' : match.status}
                   </span>
                 </div>
                 <div className="flex justify-between items-center text-lg font-bold">
@@ -132,16 +164,19 @@ const Home: React.FC = () => {
                   <span className="text-gray-400 font-medium text-sm">vs</span>
                   <span>{match.teamB}</span>
                 </div>
-                {match.winner && (
-                  <p className="text-sm text-primary-600 font-medium mt-2">{match.winner} won</p>
+                {getMatchWinnerDisplay(match) && (
+                  <p className="text-sm text-primary-600 font-medium mt-2">{getMatchWinnerDisplay(match)}</p>
                 )}
-                {match.status === 'ongoing' && (
-                  <Button onClick={(e) => { e.stopPropagation(); navigate(`/scoring/${match.id}`); }} size="sm" className="mt-3 flex items-center justify-center gap-2" variant={isAdmin ? "primary" : "secondary"} fullWidth>
+                {!actuallyCompleted && (
+                  <Button onClick={(e) => { 
+                    e.stopPropagation(); 
+                    navigate(isAdmin ? `/scoring/${match.id}` : `/live/${match.id}`); 
+                  }} size="sm" className="mt-3 flex items-center justify-center gap-2" variant={isAdmin ? "primary" : "secondary"} fullWidth>
                     {isAdmin ? <><PlayCircle size={16} /> Continue Scoring</> : <><PlayCircle size={16} /> Watch Live</>}
                   </Button>
                 )}
               </Card>
-            ))}
+            )})}
           </div>
         </section>
       ))}

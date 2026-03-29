@@ -4,13 +4,13 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../database/db';
 import Button from '../components/Button';
 import Card from '../components/Card';
-import { Share2, Home, MessageSquareQuote, Trash2 } from 'lucide-react';
+import { Share2, Home, MessageSquareQuote, Trash2, Edit2 } from 'lucide-react';
 import { generateBallWiseSummary } from '../utils/shareUtils';
 import { useToast } from '../components/Toast';
 import Modal from '../components/Modal';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../database/supabaseClient';
-import type { Ball } from '../database/schema';
+import type { Ball, ExtraType, WicketType } from '../database/schema';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -46,6 +46,13 @@ const MatchSummary: React.FC = () => {
     type?: 'danger' | 'info' | 'success'
   }>({ isOpen: false, title: '', message: '' });
 
+  const [editingBall, setEditingBall] = React.useState<Ball | null>(null);
+  const [editScore, setEditScore] = React.useState<number>(0);
+  const [editExtra, setEditExtra] = React.useState<ExtraType>('none');
+  const [editIsWicket, setEditIsWicket] = React.useState(false);
+  const [editWicketType, setEditWicketType] = React.useState<WicketType>('none');
+  const [showEditInningsModal, setShowEditInningsModal] = React.useState(false);
+
   const closeModal = () => setModalConfig(prev => ({ ...prev, isOpen: false }));
 
   const { chartData, topScorer, bestBowler, stats, summaryText } = useMemo(() => {
@@ -55,11 +62,16 @@ const MatchSummary: React.FC = () => {
     const i1 = innings.find(i => i.innings_number === 1);
     const i2 = innings.find(i => i.innings_number === 2);
 
-    let winner = 'Draw / Pending';
-    if (i1 && i2 && match.status === 'completed') {
-      if (i1.runs > i2.runs) winner = `${i1.batting_team} won by ${i1.runs - i2.runs} runs`;
-      else if (i2.runs > i1.runs) winner = `${i2.batting_team} won by ${10 - i2.wickets} wickets`;
-      else winner = 'Match Tied';
+    let winnerText = 'Draw / Pending';
+
+    if (match.status === 'completed' || (i2 && (i2.runs > i1!.runs || i2.wickets >= 10 || i2.overs >= match.overs))) {
+       if (match.winner) {
+         winnerText = `${match.winner} won the match`;
+       } else if (i1 && i2) {
+         if (i1.runs > i2.runs) winnerText = `${i1.batting_team} won by ${i1.runs - i2.runs} runs`;
+         else if (i2.runs > i1.runs) winnerText = `${i2.batting_team} won by ${10 - i2.wickets} wickets`;
+         else winnerText = 'Match Tied';
+       }
     }
 
     // Top Scorer
@@ -138,7 +150,7 @@ const MatchSummary: React.FC = () => {
     let sText = `🏆 Match Result\n\n` +
       `${i1?.batting_team}: ${i1?.runs}/${i1?.wickets} (${i1?.overs.toFixed(1)} ov)\n` +
       `${i2 ? `${i2.batting_team}: ${i2.runs}/${i2.wickets} (${i2.overs.toFixed(1)} ov)\n` : ''}\n` +
-      `${winner}\n\n`;
+      `${winnerText}\n\n`;
 
     sText += `🏏 Batting:\n`;
     batsmanStats.forEach((stat, id) => {
@@ -164,7 +176,7 @@ const MatchSummary: React.FC = () => {
       chartData: cdata,
       topScorer: tsPlayer ? `${tsPlayer.name} ${topSm.runs} (${topSm.balls})` : '-',
       bestBowler: bbPlayer ? `${bbPlayer.name} ${bestBm.wickets}/${bestBm.runs}` : '-',
-      stats: { dotPct: Math.round((totalDots / (totalLegalBalls || 1)) * 100), bndPct: Math.round((totalBoundaries / (totalLegalBalls || 1)) * 100), winner },
+      stats: { dotPct: Math.round((totalDots / (totalLegalBalls || 1)) * 100), bndPct: Math.round((totalBoundaries / (totalLegalBalls || 1)) * 100), winner: winnerText },
       summaryText: sText
     };
   }, [match, innings, balls, players]);
@@ -221,7 +233,18 @@ const MatchSummary: React.FC = () => {
                     return (
                       <React.Fragment key={b.id}>
                         {bIdx > 0 && <span className="text-gray-300 text-xs">·</span>}
-                        <span className={`text-xs ${tColor}`}>{lbl}</span>
+                        <button 
+                          onClick={isAdmin ? () => {
+                            setEditingBall(b);
+                            setEditScore(b.runs);
+                            setEditExtra(b.extra_type || 'none');
+                            setEditIsWicket(b.is_wicket || false);
+                            setEditWicketType(b.wicket_type || 'none');
+                          } : undefined} 
+                          className={`text-xs ${tColor} ${isAdmin ? 'active:scale-95 transition-transform cursor-pointer font-bold' : ''}`}
+                        >
+                          {lbl}
+                        </button>
                       </React.Fragment>
                     );
                   })}
@@ -300,10 +323,57 @@ const MatchSummary: React.FC = () => {
     });
   };
 
+  const saveEditedBall = async () => {
+    if (!editingBall) return;
+    const oldRuns = editingBall.runs;
+    const oldExtraRuns = editingBall.extra_runs || 0;
+    const oldWicket = editingBall.is_wicket ? 1 : 0;
+    const oldLegal = (editingBall.extra_type !== 'wide' && editingBall.extra_type !== 'no_ball') ? 1 : 0;
+
+    let newExtraRuns = 0;
+    if (editExtra === 'wide' || editExtra === 'no_ball') newExtraRuns = 1;
+
+    const newWicket = editIsWicket ? 1 : 0;
+    const newLegal = (editExtra !== 'wide' && editExtra !== 'no_ball') ? 1 : 0;
+
+    const runDiff = (editScore + newExtraRuns) - (oldRuns + oldExtraRuns);
+    const wicketDiff = newWicket - oldWicket;
+    const legalDiff = newLegal - oldLegal;
+
+    await db.balls.update(editingBall.id, {
+        runs: editScore,
+        extra_type: editExtra,
+        extra_runs: newExtraRuns,
+        is_wicket: editIsWicket,
+        wicket_type: editWicketType
+    });
+
+    const inn = await db.innings.get(editingBall.innings_id);
+    if (inn) {
+        const newBallsBowled = Math.max(0, inn.balls_bowled + legalDiff);
+        await db.innings.update(inn.id, {
+            runs: Math.max(0, inn.runs + runDiff),
+            wickets: Math.max(0, inn.wickets + wicketDiff),
+            balls_bowled: newBallsBowled,
+            overs: Math.floor(newBallsBowled / 6) + (newBallsBowled % 6) / 10
+        });
+    }
+
+    setEditingBall(null);
+  };
+
   return (
     <div className="p-4 pb-24 max-w-lg mx-auto space-y-4">
-      <Card className="p-5 text-center bg-gradient-to-br from-primary-600 to-primary-700 text-white border-0 shadow-lg shadow-primary-500/30">
-        <h2 className="text-xl font-bold mb-4 opacity-90">Match Result</h2>
+      <Card className="relative p-5 text-center bg-gradient-to-br from-primary-600 to-primary-700 text-white border-0 shadow-lg shadow-primary-500/30">
+        {isAdmin && (
+           <button 
+             onClick={() => setShowEditInningsModal(true)}
+             className="absolute top-4 right-4 p-2 bg-white/20 rounded-full hover:bg-white/30 transition-colors"
+           >
+             <Edit2 size={16} />
+           </button>
+        )}
+        <h2 className="text-sm font-bold opacity-80 uppercase tracking-wider mb-2">Match Summary</h2>
 
         {innings.map(inn => (
           <div key={inn.id} className="flex justify-between items-center mb-2 px-2">
@@ -396,6 +466,109 @@ const MatchSummary: React.FC = () => {
         onConfirm={modalConfig.onConfirm}
         type={modalConfig.type}
       />
+
+      {editingBall && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <Card className="full max-w-sm p-5 w-full">
+            <h3 className="text-xl font-bold mb-4">Edit Ball</h3>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs font-bold text-gray-500 uppercase">Runs (Batter)</label>
+                <input 
+                  type="number" 
+                  value={editScore} 
+                  onChange={(e) => setEditScore(parseInt(e.target.value) || 0)}
+                  className="w-full mt-1 p-2 border rounded-lg bg-gray-50 dark:bg-gray-800 dark:border-gray-700" 
+                />
+              </div>
+
+              <div>
+                 <label className="text-xs font-bold text-gray-500 uppercase">Extra Type</label>
+                 <select 
+                    value={editExtra} 
+                    onChange={(e) => setEditExtra(e.target.value as ExtraType)}
+                    className="w-full mt-1 p-2 border rounded-lg bg-gray-50 dark:bg-gray-800 dark:border-gray-700"
+                 >
+                    <option value="none">None</option>
+                    <option value="wide">Wide</option>
+                    <option value="no_ball">No Ball</option>
+                    <option value="bye">Bye</option>
+                    <option value="leg_bye">Leg Bye</option>
+                 </select>
+              </div>
+
+              <div className="flex items-center gap-2">
+                 <input 
+                    type="checkbox" 
+                    id="isWicket" 
+                    checked={editIsWicket} 
+                    onChange={(e) => setEditIsWicket(e.target.checked)} 
+                    className="w-5 h-5"
+                 />
+                 <label htmlFor="isWicket" className="font-bold">Is Wicket?</label>
+              </div>
+
+              {editIsWicket && (
+                 <div>
+                    <label className="text-xs font-bold text-gray-500 uppercase">Wicket Type</label>
+                    <select 
+                       value={editWicketType} 
+                       onChange={(e) => setEditWicketType(e.target.value as WicketType)}
+                       className="w-full mt-1 p-2 border rounded-lg bg-gray-50 dark:bg-gray-800 dark:border-gray-700"
+                    >
+                       <option value="caught">Caught</option>
+                       <option value="bowled">Bowled</option>
+                       <option value="run_out">Run Out</option>
+                       <option value="stumped">Stumped</option>
+                       <option value="lbw">LBW</option>
+                       <option value="hit_wicket">Hit Wicket</option>
+                    </select>
+                 </div>
+              )}
+            </div>
+
+            <div className="flex gap-2 mt-6">
+               <Button variant="ghost" onClick={() => setEditingBall(null)} fullWidth>Cancel</Button>
+               <Button variant="primary" onClick={saveEditedBall} fullWidth>Save</Button>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* Edit Match Totals Modal */}
+      {showEditInningsModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <Card className="w-full max-w-sm p-5 animate-in zoom-in duration-200">
+            <h3 className="text-xl font-bold mb-4 text-gray-900 dark:text-gray-50 flex items-center gap-2">
+              <Edit2 size={20} className="text-primary-600"/> Edit Match
+            </h3>
+            
+            <p className="text-sm text-gray-500 mb-6">Which innings would you like to edit? This will open the live scoring screen allowing you to adjust specific balls, wickets, or extra deliveries.</p>
+
+            <div className="space-y-3">
+              {innings.map((inn) => (
+                <button
+                   key={inn.id}
+                   onClick={() => navigate(`/scoring/${match.id}`, { state: { editInningsNumber: inn.innings_number } })}
+                   className="w-full text-left p-4 bg-gray-50 hover:bg-primary-50 dark:bg-gray-800 dark:hover:bg-primary-900/30 rounded-xl border border-gray-100 dark:border-gray-700 transition-colors group"
+                >
+                   <div className="font-bold text-gray-900 dark:text-gray-50 group-hover:text-primary-600 dark:group-hover:text-primary-400">
+                      Innings {inn.innings_number}: {inn.batting_team}
+                   </div>
+                   <div className="text-sm font-medium text-gray-500">
+                      {inn.runs}/{inn.wickets} ({inn.overs} ov)
+                   </div>
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-6">
+               <Button variant="ghost" onClick={() => setShowEditInningsModal(false)} fullWidth>Cancel</Button>
+            </div>
+          </Card>
+        </div>
+      )}
     </div>
   );
 };

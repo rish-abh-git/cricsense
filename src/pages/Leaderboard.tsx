@@ -2,13 +2,15 @@ import React, { useMemo, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../database/db';
 import Card from '../components/Card';
-import { Medal, Trophy, Share2 } from 'lucide-react';
+import { Medal, Trophy, Share2, Info } from 'lucide-react';
+import { Link } from 'react-router-dom';
 
 const Leaderboard: React.FC = () => {
   const [tab, setTab] = useState<'gully' | 'batsmen' | 'bowlers'>('gully');
 
   const players = useLiveQuery(async () => {
-    return await db.players.toArray();
+    const all = await db.players.toArray();
+    return all.filter(p => !/\d/.test(p.name));
   }) || [];
   const matches = useLiveQuery(() => db.matches.toArray()) || [];
   const archivedMatchIds = useMemo(() => new Set(matches.filter(m => m.is_archived).map(m => m.id)), [matches]);
@@ -160,6 +162,14 @@ const Leaderboard: React.FC = () => {
         </button>
       </div>
 
+      {tab === 'gully' && (
+        <div className="text-center mt-3 animate-in fade-in slide-in-from-top-2 duration-300">
+          <p className="text-[10px] text-gray-500 dark:text-gray-400 font-medium inline-flex items-center gap-1 bg-gray-50 dark:bg-gray-800 px-3 py-1 rounded-full border border-gray-100 dark:border-gray-700">
+            <Info size={12} /> Score = Runs + (20 × Wickets) + (10 × Fielder Dismissals) - Dots
+          </p>
+        </div>
+      )}
+
       <div className="space-y-3">
         {tab === 'gully' ? (
           rankings.topGully.length > 0 ? (
@@ -170,7 +180,7 @@ const Leaderboard: React.FC = () => {
                     {idx === 0 ? <Trophy size={16} /> : idx + 1}
                   </div>
                   <div>
-                    <h3 className="font-bold text-gray-900 dark:text-gray-50">{p.name}</h3>
+                    <Link to="/analytics" state={{ selectedPlayer: p.id }} className="block font-bold text-gray-900 dark:text-gray-50 hover:text-primary-600 transition-colors">{p.name}</Link>
                     <p className="text-[10px] text-gray-500 dark:text-gray-400 font-bold uppercase tracking-widest mt-0.5">Overall Rank</p>
                   </div>
                 </div>
@@ -191,7 +201,7 @@ const Leaderboard: React.FC = () => {
                     {idx + 1}
                   </div>
                   <div>
-                    <h3 className="font-bold text-gray-900 dark:text-gray-50">{p.name}</h3>
+                    <Link to="/analytics" state={{ selectedPlayer: p.id }} className="block font-bold text-gray-900 dark:text-gray-50 hover:text-primary-600 transition-colors">{p.name}</Link>
                     <p className="text-xs text-gray-500 dark:text-gray-400 font-medium tracking-wide mt-0.5">SR: {p.sr}</p>
                   </div>
                 </div>
@@ -212,7 +222,7 @@ const Leaderboard: React.FC = () => {
                     {idx + 1}
                   </div>
                   <div>
-                    <h3 className="font-bold text-gray-900 dark:text-gray-50">{p.name}</h3>
+                    <Link to="/analytics" state={{ selectedPlayer: p.id }} className="block font-bold text-gray-900 dark:text-gray-50 hover:text-primary-600 transition-colors">{p.name}</Link>
                     <p className="text-xs text-gray-500 dark:text-gray-400 font-medium tracking-wide mt-0.5">ECO: {p.eco}</p>
                   </div>
                 </div>
