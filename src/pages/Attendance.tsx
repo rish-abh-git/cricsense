@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../database/db';
 import Card from '../components/Card';
-import { Users, Trophy, CalendarDays } from 'lucide-react';
+import { Users, CalendarDays } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 const Attendance: React.FC = () => {
@@ -28,6 +28,8 @@ const Attendance: React.FC = () => {
   };
 
   const pastSundays = getPastSundays(10); // Last 10 Sundays
+
+  const manualAttendance = useLiveQuery(() => db.attendance.toArray()) || [];
 
   const getAttendanceStatus = (playerId: string, dateObj: Date) => {
     const dateString = dateObj.toDateString();
@@ -68,8 +70,6 @@ const Attendance: React.FC = () => {
       showToast("Failed to update attendance", "error");
     }
   };
-
-  const manualAttendance = useLiveQuery(() => db.attendance.toArray()) || [];
 
   const getPlayerWiseStats = (mode: 'recent' | 'month' | 'ytd') => {
     const stats: Record<string, Set<string>> = {}; // using Set for unique dates
@@ -161,53 +161,56 @@ const Attendance: React.FC = () => {
       </Card>
 
       <Card className="p-4 bg-white dark:bg-gray-900 border-0 shadow-sm">
-        <div className="flex justify-between items-end mb-4 px-2">
-           <span className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-1"><Users size={14}/> Player</span>
-           <span className="text-xs font-bold text-gray-400 uppercase tracking-widest text-right flex items-center gap-1"><Trophy size={14}/> {viewMode === 'recent' ? 'Recents / Total' : 'Total Days'}</span>
-        </div>
-
-        <div className="space-y-3">
+        <div className="space-y-2">
           {sortedPlayers.length > 0 ? (
             sortedPlayers.map(player => {
               const total = playerStats[player.id] || 0;
               return (
-                <div key={player.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 rounded-xl border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
-                  <div className="flex justify-between w-full sm:w-auto items-center mb-2 sm:mb-0">
-                    <span className="font-bold text-gray-900 dark:text-gray-100">{player.name}</span>
-                    <span className="sm:hidden text-xs font-bold bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 px-2 py-0.5 rounded-full">Total: {total}</span>
-                  </div>
-                  
-                  <div className="flex items-center gap-4 sm:ml-auto">
-                    {viewMode === 'recent' ? (
-                      <div className="flex gap-1.5 overflow-x-auto pb-1 sm:pb-0 scrollbar-hide">
-                        {pastSundays.map((dateObj, idx) => {
-                          const status = getAttendanceStatus(player.id, dateObj);
-                          return (
-                            <div 
-                              key={idx} 
-                              title={dateObj.toLocaleDateString([], { month: 'short', day: 'numeric' })}
-                              onClick={() => handleToggleAttendance(player.id, dateObj)}
-                              className={`w-6 h-6 rounded flex items-center justify-center flex-shrink-0 relative group cursor-pointer active:scale-90 transition-all ${status.attended ? 'bg-green-100 dark:bg-green-900/50 border border-green-200 dark:border-green-800' : 'bg-gray-100 dark:bg-gray-800 border border-transparent hover:border-gray-300 dark:hover:border-gray-500'}`}
-                            >
-                               {status.attended ? (
-                                 <div className={`w-2.5 h-2.5 rounded-full shadow-sm ${status.type === 'match' ? 'bg-green-600' : 'bg-green-500 animate-pulse-slow'}`}></div>
-                               ) : null}
-                               <span className="absolute -top-6 bg-gray-800 text-white text-[10px] px-2 py-0.5 rounded opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap transition-opacity z-10">
-                                  {dateObj.toLocaleDateString([], { day: '2-digit', month: 'short' })} {status.type === 'match' ? '(Match)' : '(Manual)'}
-                               </span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-1 text-[10px] font-bold text-gray-400 uppercase tracking-widest mr-2">
-                        <CalendarDays size={14} className="opacity-80"/> Days
-                      </div>
-                    )}
-                    <span className="hidden sm:inline-flex items-center justify-center text-sm font-bold bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 px-2 py-1 rounded-xl min-w-[2.5rem] border border-primary-200 dark:border-primary-800">
-                       {total}
+                <div key={player.id} className="p-3 rounded-xl border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="font-bold text-gray-900 dark:text-gray-100 text-sm">{player.name}</span>
+                    <span className="text-xs font-bold bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 px-2 py-0.5 rounded-full">
+                      {total} days
                     </span>
                   </div>
+
+                  {viewMode === 'recent' ? (
+                    <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+                      {pastSundays.map((dateObj, idx) => {
+                        const status = getAttendanceStatus(player.id, dateObj);
+                        return (
+                          <div key={idx} className="flex flex-col items-center gap-1 flex-shrink-0">
+                            {/* Date label above each box */}
+                            <div className="text-center leading-none">
+                              <div className="text-[9px] font-bold text-gray-500 dark:text-gray-400">
+                                {dateObj.toLocaleDateString([], { day: 'numeric' })}
+                              </div>
+                              <div className="text-[8px] font-medium text-gray-400 dark:text-gray-500">
+                                {dateObj.toLocaleDateString([], { month: 'short' })}
+                              </div>
+                            </div>
+                            {/* Attendance box */}
+                            <div
+                              onClick={() => handleToggleAttendance(player.id, dateObj)}
+                              className={`w-8 h-8 rounded-lg flex items-center justify-center cursor-pointer active:scale-90 transition-all ${
+                                status.attended
+                                  ? 'bg-green-100 dark:bg-green-900/50 border-2 border-green-400 dark:border-green-600'
+                                  : 'bg-white dark:bg-gray-700 border-2 border-gray-200 dark:border-gray-600'
+                              }`}
+                            >
+                              {status.attended && (
+                                <div className={`w-3.5 h-3.5 rounded-full ${status.type === 'match' ? 'bg-green-600' : 'bg-green-400'}`} />
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1 text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                      <CalendarDays size={13} className="opacity-80"/> {total} unique days
+                    </div>
+                  )}
                 </div>
               );
             })
@@ -218,6 +221,7 @@ const Attendance: React.FC = () => {
           )}
         </div>
       </Card>
+
       
       <div className="bg-blue-50 dark:bg-blue-900/10 p-4 rounded-2xl border border-blue-100 dark:border-blue-800 flex flex-col gap-3 text-blue-800 dark:text-blue-300">
         <div className="flex gap-3">
