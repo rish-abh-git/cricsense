@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../database/db';
@@ -24,8 +24,6 @@ const LiveScoring: React.FC = () => {
   const match = useLiveQuery(() => db.matches.get(matchId || ''));
   const allPlayers = useLiveQuery(() => db.players.toArray()) || [];
   const inningsList = useLiveQuery(() => db.innings.where('match_id').equals(matchId || '').toArray());
-  const balls = useLiveQuery(() => matchId ? db.balls.toArray() : []);
-
   const location = useLocation();
   const editInningsNumber = location.state?.editInningsNumber as number | undefined;
 
@@ -40,7 +38,16 @@ const LiveScoring: React.FC = () => {
     return list.reduce((prev, current) => (prev.innings_number > current.innings_number) ? prev : current);
   }, [matchId, editInningsNumber]);
 
-  const [inningsBalls, setInningsBalls] = useState<Ball[]>([]);
+  const inningsBalls = useLiveQuery(async () => {
+    if (!activeInnings) return [];
+    const iballs = await db.balls.where('innings_id').equals(activeInnings.id).toArray();
+    iballs.sort((a, b) => {
+      if (a.timestamp && b.timestamp) return a.timestamp - b.timestamp;
+      if (a.over_number !== b.over_number) return a.over_number - b.over_number;
+      return a.ball_number - b.ball_number;
+    });
+    return iballs;
+  }, [activeInnings?.id]) ?? [];
 
   const [showWicketModal, setShowWicketModal] = useState(false);
   const [selectedWicketType, setSelectedWicketType] = useState<WicketType | null>(null);
@@ -179,19 +186,6 @@ const LiveScoring: React.FC = () => {
 
   // Removed manual activeInnings useEffect in favor of useLiveQuery
 
-  useEffect(() => {
-    if (activeInnings && balls) {
-      const iballs = balls.filter(b => b.innings_id === activeInnings.id);
-      // Sort by timestamp first, fallback to over/ball (fix 1.3)
-      iballs.sort((a, b) => {
-        if (a.timestamp && b.timestamp) return a.timestamp - b.timestamp;
-        if (a.over_number !== b.over_number) return a.over_number - b.over_number;
-        return a.ball_number - b.ball_number;
-      });
-      setInningsBalls(iballs);
-    }
-  }, [activeInnings, balls]);
-
   // Auto-scroll ball timeline to the right (feature 2.6)
   useEffect(() => {
     if (ballTimelineRef.current) {
@@ -206,7 +200,13 @@ const LiveScoring: React.FC = () => {
     }
   }, [inningsBalls]);
 
-  const isInningsComplete = (activeInnings && match) ? (activeInnings.wickets >= 10 || activeInnings.overs >= match.overs) : false;
+  const totalLegalBalls = useMemo(() =>
+    inningsBalls.filter(b => b.extra_type !== 'wide' && b.extra_type !== 'no_ball').length
+  , [inningsBalls]);
+
+  const isInningsComplete = (activeInnings && match)
+    ? (activeInnings.wickets >= 10 || totalLegalBalls >= match.overs * 6)
+    : false;
   const innings1 = inningsList?.find(i => i.innings_number === 1);
   const innings1Runs = innings1?.runs || match?.first_innings_total || 0;
   const isMatchComplete = (match && activeInnings) ? (match.status === 'completed' || (activeInnings.innings_number === 2 && (isInningsComplete || activeInnings.runs > innings1Runs))) : false;
