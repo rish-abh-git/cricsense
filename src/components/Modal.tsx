@@ -9,6 +9,8 @@ interface ModalProps {
     message: string;
     confirmLabel?: string;
     onConfirm?: () => void;
+    secondaryLabel?: string;
+    onSecondary?: () => void;
     type?: 'danger' | 'info' | 'success';
 }
 
@@ -19,6 +21,8 @@ const Modal: React.FC<ModalProps> = ({
     message,
     confirmLabel = 'Confirm',
     onConfirm,
+    secondaryLabel,
+    onSecondary,
     type = 'info'
 }) => {
     useEffect(() => {
@@ -83,10 +87,23 @@ const Modal: React.FC<ModalProps> = ({
                     </p>
                 </div>
 
-                <div className="p-6 bg-gray-50 dark:bg-gray-850 flex gap-3">
+                <div className="p-6 bg-gray-50 dark:bg-gray-850 flex flex-col-reverse sm:flex-row gap-3">
                     <Button variant="outline" fullWidth onClick={onClose} className="flex-1">
                         Cancel
                     </Button>
+                    {secondaryLabel && (
+                        <Button 
+                            variant="secondary" 
+                            fullWidth 
+                            onClick={() => {
+                                onSecondary?.();
+                                onClose();
+                            }} 
+                            className="flex-1"
+                        >
+                            {secondaryLabel}
+                        </Button>
+                    )}
                     <Button
                         variant={currentType.btnVariant}
                         fullWidth
@@ -94,7 +111,7 @@ const Modal: React.FC<ModalProps> = ({
                             onConfirm?.();
                             onClose();
                         }}
-                        className="flex-1"
+                        className="flex-[1.5]"
                     >
                         {confirmLabel}
                     </Button>

@@ -11,6 +11,7 @@ import { PlayerRepo } from '../database/repository';
 import Modal from '../components/Modal';
 import { useToast } from '../components/Toast';
 import { useAuth } from '../contexts/AuthContext';
+import { formatOvers } from '../utils/dataUtils';
 
 const WICKET_TYPES: WicketType[] = ['bowled', 'caught', 'run_out', 'stumped', 'lbw', 'hit_wicket'];
 
@@ -59,6 +60,8 @@ const LiveScoring: React.FC = () => {
   const [editExtra, setEditExtra] = useState<ExtraType>('none');
   const [editIsWicket, setEditIsWicket] = useState(false);
   const [editWicketType, setEditWicketType] = useState<WicketType>('none');
+
+  const [isProcessing, setIsProcessing] = useState(false);
 
   const [isVoiceMode, setIsVoiceMode] = useState(false);
   const isVoiceModeRef = useRef(isVoiceMode);
@@ -146,7 +149,11 @@ const LiveScoring: React.FC = () => {
       recognition.onerror = (event: any) => {
         console.error('Speech recognition error', event.error);
         if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+          showToast(`Microphone access blocked: ${event.error}`, "error");
           setIsVoiceMode(false);
+        } else if (event.error !== 'no-speech') {
+          // Log other errors quietly or occasionally toast them
+          console.warn(`Speech recognition warn: ${event.error}`);
         }
       };
 
@@ -258,7 +265,7 @@ const LiveScoring: React.FC = () => {
     const target = innings1Runs + 1;
     const runsNeeded = target - activeInnings.runs;
     const totalBalls = match.overs * 6;
-    const ballsBowled = activeInnings.balls_bowled;
+    const ballsBowled = totalLegalBalls;
     const ballsRemaining = totalBalls - ballsBowled;
     const rrr = ballsRemaining > 0 ? ((runsNeeded / ballsRemaining) * 6) : 0;
     return { runsNeeded, ballsRemaining, rrr: rrr > 0 ? rrr.toFixed(1) : '0.0' };
@@ -274,6 +281,7 @@ const LiveScoring: React.FC = () => {
 
 
   const handleScoreBall = async (runs: number, extra: ExtraType = 'none', isWicket: boolean = false, wicketType: WicketType = 'none', outPlayerId?: string, fielderId?: string, noStrikeChange: boolean = false) => {
+    if (isProcessing) return;
     if (!editInningsNumber && (isMatchComplete || isInningsComplete)) return; // Prevent fast clicking unless editing
 
     if (!striker || !nonStriker || !bowler) {
@@ -282,41 +290,46 @@ const LiveScoring: React.FC = () => {
       return; 
     }
 
-    const isLegal = extra !== 'wide' && extra !== 'no_ball';
-    const actualBalls = await db.balls.where('innings_id').equals(activeInnings.id).toArray();
-    const legalBallsCount = actualBalls.filter(b => b.extra_type !== 'wide' && b.extra_type !== 'no_ball').length;
-    
-    let nextOverNumber = Math.floor(legalBallsCount / 6);
-    let currentOverBalls = legalBallsCount % 6;
-    let nextBallNumber = isLegal ? currentOverBalls + 1 : currentOverBalls;
+    setIsProcessing(true);
+    try {
+      const isLegal = extra !== 'wide' && extra !== 'no_ball';
+      const actualBalls = await db.balls.where('innings_id').equals(activeInnings.id).toArray();
+      const legalBallsCount = actualBalls.filter(b => b.extra_type !== 'wide' && b.extra_type !== 'no_ball').length;
+      
+      let nextOverNumber = Math.floor(legalBallsCount / 6);
+      let currentOverBalls = legalBallsCount % 6;
+      let nextBallNumber = isLegal ? currentOverBalls + 1 : currentOverBalls;
 
-    let extraRuns = 0;
-    if (extra === 'wide' || extra === 'no_ball') extraRuns = 1;
+      let extraRuns = 0;
+      if (extra === 'wide' || extra === 'no_ball') extraRuns = 1;
 
-    const ball: Omit<Ball, 'id'> = {
-      innings_id: activeInnings.id,
-      over_number: nextOverNumber,
-      ball_number: nextBallNumber,
-      batsman_id: striker.id,
-      bowler_id: bowler.id,
-      runs,
-      extra_type: extra,
-      extra_runs: extraRuns,
-      is_wicket: isWicket,
-      wicket_type: wicketType,
-      player_out_id: outPlayerId,
-      fielder_id: fielderId
-    };
+      const ball: Omit<Ball, 'id'> = {
+        innings_id: activeInnings.id,
+        over_number: nextOverNumber,
+        ball_number: nextBallNumber,
+        batsman_id: striker.id,
+        bowler_id: bowler.id,
+        runs,
+        extra_type: extra,
+        extra_runs: extraRuns,
+        is_wicket: isWicket,
+        wicket_type: wicketType,
+        player_out_id: outPlayerId,
+        fielder_id: fielderId
+      };
 
-    await BallRepo.add(ball, noStrikeChange);
+      await BallRepo.add(ball, noStrikeChange);
 
-    setShowWicketModal(false);
-    setSelectedWicketType(null);
-    setShowFielderSelectModal(false);
-    setPendingExtraRunOut(null);
+      setShowWicketModal(false);
+      setSelectedWicketType(null);
+      setShowFielderSelectModal(false);
+      setPendingExtraRunOut(null);
 
-    // Show undo snackbar
-    showSnackbar();
+      // Show undo snackbar
+      showSnackbar();
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const handleEditBall = (ball: Ball) => {
@@ -525,7 +538,7 @@ const LiveScoring: React.FC = () => {
             <div className="mb-2">
               <div className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase mb-1.5 ml-1">Over-wise Summary</div>
               <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-                {Array.from({ length: Math.max(1, Math.ceil(activeInnings.overs)) }).map((_, idx) => {
+                {Array.from({ length: (inningsBalls.length > 0 ? Math.max(...inningsBalls.map(b => b.over_number)) : 0) + 1 }).map((_, idx) => {
                   const overNumber = idx;
                   const overBalls = inningsBalls.filter(b => b.over_number === overNumber);
                   if (overBalls.length === 0) return null;
@@ -609,7 +622,7 @@ const LiveScoring: React.FC = () => {
                   onClick={() => isAdmin && setShowPlayerSelectModal({ type: 'bowler', open: true })}
                 >
                   <span className="font-bold text-gray-900 dark:text-gray-50 truncate">{bowler?.name || 'Select Bowler'}</span>
-                  {bwlStats && <span className="text-sm font-medium text-gray-600 dark:text-gray-300">{bwlStats.runsGiven}-{bwlStats.wickets} <span className="text-xs text-gray-400">({bwlStats.overs.toFixed(1)})</span></span>}
+                  {bwlStats && <span className="text-sm font-medium text-gray-600 dark:text-gray-300">{bwlStats.runsGiven}-{bwlStats.wickets} <span className="text-xs text-gray-400">({formatOvers(bwlStats.legalBalls)})</span></span>}
                 </div>
               </Card>
             </div>
@@ -682,7 +695,7 @@ const LiveScoring: React.FC = () => {
                   ref={overSummaryRef}
                   className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide"
                 >
-                  {Array.from({ length: Math.max(1, Math.ceil(activeInnings.overs)) }).map((_, idx) => {
+                  {Array.from({ length: (inningsBalls.length > 0 ? Math.max(...inningsBalls.map(b => b.over_number)) : 0) + 1 }).map((_, idx) => {
                     const overNumber = idx;
                     const overBalls = inningsBalls.filter(b => b.over_number === overNumber);
                     if (overBalls.length === 0) return null;

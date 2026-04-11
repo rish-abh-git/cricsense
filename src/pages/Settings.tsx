@@ -20,7 +20,6 @@ const Settings: React.FC = () => {
   const { showToast } = useToast();
   const [showPlayerManager, setShowPlayerManager] = React.useState(false);
   const [isClearing, setIsClearing] = React.useState(false);
-  const [isSeeding, setIsSeeding] = React.useState(false);
   const [isExporting, setIsExporting] = React.useState(false);
   const [isImporting, setIsImporting] = React.useState(false);
   const [isDeletingPlayer, setIsDeletingPlayer] = React.useState(false);
@@ -32,6 +31,8 @@ const Settings: React.FC = () => {
     message: string;
     confirmLabel?: string;
     onConfirm?: () => void;
+    secondaryLabel?: string;
+    onSecondary?: () => void;
     type?: 'danger' | 'info' | 'success';
   }>({
     isOpen: false,
@@ -71,43 +72,41 @@ const Settings: React.FC = () => {
     });
   };
 
-  const handleSeedData = async () => {
+
+  const handleExportData = async () => {
     setModalConfig({
       isOpen: true,
-      title: 'Seed Dummy Data?',
-      message: 'This will replace all existing data with sample players and matches. Continue?',
-      confirmLabel: 'Seed Data',
+      title: 'Export Options',
+      message: 'Would you like to send this backup directly to your email or download it locally?',
+      confirmLabel: 'Send Email Backup',
+      secondaryLabel: 'Download Locally',
       type: 'info',
-      onConfirm: async () => {
-        setIsSeeding(true);
+      onSecondary: async () => {
+        setIsExporting(true);
         try {
-          await clearCloudData();
-          const { seedDatabase } = await import('../utils/seedData');
-          await seedDatabase();
-          showToast('Cloud cleared and dummy data seeded', 'success');
-          setTimeout(() => {
-            window.location.href = '/';
-          }, 1500);
+          await exportData();
+          showToast('Data exported locally', 'success');
         } catch (err) {
-          console.error(err);
-          showToast('Failed to seed data', 'error');
+          showToast('Failed to export data', 'error');
         } finally {
-          setIsSeeding(false);
+          setIsExporting(false);
+          closeModal();
+        }
+      },
+      onConfirm: async () => {
+        setIsExporting(true);
+        try {
+          const { exportDataByMail } = await import('../utils/dataUtils');
+          await exportDataByMail();
+          showToast('Backup emailed successfully! (Check spam or verify if first time)', 'success');
+        } catch (err) {
+          showToast('Failed to email data', 'error');
+        } finally {
+          setIsExporting(false);
+          closeModal();
         }
       }
     });
-  };
-
-  const handleExportData = async () => {
-    setIsExporting(true);
-    try {
-      await exportData();
-      showToast('Data exported successfully', 'success');
-    } catch (err) {
-      showToast('Failed to export data', 'error');
-    } finally {
-      setIsExporting(false);
-    }
   };
 
   const handleImportData = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -185,22 +184,6 @@ const Settings: React.FC = () => {
         </h2>
         <p className="text-gray-500 dark:text-gray-400 mt-1 mb-4">Manage your offline application data.</p>
 
-        <Card className="p-5 mb-4 bg-primary-50 dark:bg-primary-900/10 border-l-4 border-l-primary-500">
-          <div className="flex gap-3 mb-4">
-            <div className="text-primary-500 mt-0.5">
-              <Database size={24} />
-            </div>
-            <div>
-              <h3 className="font-bold text-primary-900 dark:text-primary-100">Starter Data</h3>
-              <p className="text-sm text-primary-700 dark:text-primary-300 mt-1 leading-relaxed">
-                Quickly populate the app with legendary players and a sample match to test all features.
-              </p>
-            </div>
-          </div>
-          <Button variant="primary" fullWidth onClick={handleSeedData} isLoading={isSeeding}>
-            Seed Dummy Data
-          </Button>
-        </Card>
 
         <Card className="p-5 mb-4 bg-green-50 dark:bg-green-900/10 border-l-4 border-l-green-500">
           <div className="flex gap-3 mb-4">
@@ -286,6 +269,8 @@ const Settings: React.FC = () => {
         message={modalConfig.message}
         confirmLabel={modalConfig.confirmLabel}
         onConfirm={modalConfig.onConfirm}
+        secondaryLabel={modalConfig.secondaryLabel}
+        onSecondary={modalConfig.onSecondary}
         type={modalConfig.type}
       />
 

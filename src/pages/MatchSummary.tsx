@@ -4,7 +4,8 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../database/db';
 import Button from '../components/Button';
 import Card from '../components/Card';
-import { Share2, Home, MessageSquareQuote, Trash2, Edit2 } from 'lucide-react';
+import { Share2, Home, MessageSquareQuote, Trash2, Edit2, Download } from 'lucide-react';
+import { exportSingleMatch, formatOvers } from '../utils/dataUtils';
 import { generateBallWiseSummary } from '../utils/shareUtils';
 import { useToast } from '../components/Toast';
 import Modal from '../components/Modal';
@@ -164,8 +165,7 @@ const MatchSummary: React.FC = () => {
     bowlerStats.forEach((stat, id) => {
       const p = players.find(x => x.id === id);
       if (p && (stat.legalBalls > 0 || stat.runs > 0)) {
-        const ovs = Math.floor(stat.legalBalls / 6) + (stat.legalBalls % 6) / 10;
-        sText += `- ${p.name}: ${stat.wickets}/${stat.runs} (${ovs.toFixed(1)} ov) [Dots:${stat.dots}]\n`;
+        sText += `- ${p.name}: ${stat.wickets}/${stat.runs} (${formatOvers(stat.legalBalls)} ov) [Dots:${stat.dots}]\n`;
       }
     });
 
@@ -441,6 +441,12 @@ const MatchSummary: React.FC = () => {
       <div className="grid grid-cols-1 gap-3 mt-4">
         <Button variant="primary" onClick={handleShare} className="flex justify-center gap-2.5 shadow-md shadow-primary-500/20">
           <Share2 size={18} /> Share Results
+        </Button>
+        <Button variant="outline" onClick={async () => {
+          showToast('Preparing File...', 'info');
+          await exportSingleMatch(matchId!, `${match?.teamA} vs ${match?.teamB}`);
+        }} className="flex justify-center gap-2.5 bg-white dark:bg-gray-800">
+          <Download size={18} /> Export JSON Data
         </Button>
       </div>
 
