@@ -13,7 +13,7 @@ const Leaderboard: React.FC = () => {
     return all.filter(p => !/\d/.test(p.name));
   }) || [];
   const matches = useLiveQuery(() => db.matches.toArray()) || [];
-  const archivedMatchIds = useMemo(() => new Set(matches.filter(m => m.is_archived).map(m => m.id)), [matches]);
+  const archivedMatchIds = useMemo(() => new Set(matches.filter(m => m.is_archived || m.is_box_cricket || m.isBoxCricket).map(m => m.id)), [matches]);
   const innings = useLiveQuery(() => db.innings.toArray()) || [];
   const validInningsIds = useMemo(() => new Set(innings.filter(i => !archivedMatchIds.has(i.match_id)).map(i => i.id)), [innings, archivedMatchIds]);
   const balls = useLiveQuery(() => db.balls.toArray()) || [];

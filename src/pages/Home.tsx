@@ -31,7 +31,8 @@ const Home: React.FC = () => {
     const i1 = mInnings.find(i => i.innings_number === 1);
     const i2 = mInnings.find(i => i.innings_number === 2);
     if (!i1) return false;
-    if (i2 && (i2.wickets >= 10 || i2.overs >= match.overs || i2.runs > i1.runs)) return true;
+    const targetWickets = (match.is_box_cricket || match.isBoxCricket) ? 999 : 10;
+    if (i2 && (i2.wickets >= targetWickets || i2.overs >= match.overs || i2.runs > i1.runs)) return true;
     return false;
   };
 
@@ -41,8 +42,9 @@ const Home: React.FC = () => {
     const i1 = mInnings.find(i => i.innings_number === 1);
     const i2 = mInnings.find(i => i.innings_number === 2);
     if (!i1 || !i2) return null;
+    const targetWickets = (match.is_box_cricket || match.isBoxCricket) ? 999 : 10;
     if (i2.runs > i1.runs) return `${i2.batting_team} won`;
-    if (i2.wickets >= 10 || i2.overs >= match.overs) {
+    if (i2.wickets >= targetWickets || i2.overs >= match.overs) {
       if (i1.runs > i2.runs) return `${i1.batting_team} won`;
       if (i1.runs === i2.runs) return 'Match Tied';
     }

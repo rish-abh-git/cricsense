@@ -27,7 +27,7 @@ const PlayerAnalytics: React.FC = () => {
     return all.filter(p => p.is_morya_warrior && !/\d/.test(p.name)).sort((a, b) => a.name.localeCompare(b.name));
   }) || [];
   const matches = useLiveQuery(() => db.matches.toArray()) || [];
-  const activeMatches = useMemo(() => matches.filter(m => !m.is_archived), [matches]);
+  const activeMatches = useMemo(() => matches.filter(m => !m.is_archived && !m.is_box_cricket && !m.isBoxCricket), [matches]);
   const activeMatchIds = useMemo(() => new Set(activeMatches.map(m => m.id)), [activeMatches]);
 
   const innings = useLiveQuery(() => db.innings.toArray()) || [];

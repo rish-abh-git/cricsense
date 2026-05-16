@@ -23,6 +23,7 @@ export interface Match {
   battingFirst?: string;
   firstInningsTotal?: number;
   matchAttendance?: string[]; // player IDs present for this match
+  isBoxCricket?: boolean;
 
   // New fields for sync logic (snake_case versions)
   team_a?: string;
@@ -35,6 +36,7 @@ export interface Match {
   batting_first?: string;
   first_innings_total?: number;
   match_attendance?: string[];
+  is_box_cricket?: boolean;
 }
 
 export interface Innings {

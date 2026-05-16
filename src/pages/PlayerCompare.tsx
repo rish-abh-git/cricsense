@@ -10,14 +10,19 @@ const PlayerCompare: React.FC = () => {
   const players = useLiveQuery(() => db.players.toArray()) || [];
   const balls = useLiveQuery(() => db.balls.toArray()) || [];
 
+  const matches = useLiveQuery(() => db.matches.toArray()) || [];
+  const validMatchIds = useMemo(() => new Set(matches.filter(m => !m.is_archived && !m.is_box_cricket && !m.isBoxCricket).map(m => m.id)), [matches]);
+  const innings = useLiveQuery(() => db.innings.toArray()) || [];
+  const validInningsIds = useMemo(() => new Set(innings.filter(i => validMatchIds.has(i.match_id)).map(i => i.id)), [innings, validMatchIds]);
+
   const compareStats = useMemo(() => {
     return selectedPlayerIds.map(pid => {
       const player = players.find(p => p.id === pid);
       if (!player) return null;
 
-      const pb = balls.filter(b => b.batsman_id === pid);
-      const bowlingBalls = balls.filter(b => b.bowler_id === pid);
-      const fieldingBalls = balls.filter(b => b.fielder_id === pid);
+      const pb = balls.filter(b => b.batsman_id === pid && validInningsIds.has(b.innings_id));
+      const bowlingBalls = balls.filter(b => b.bowler_id === pid && validInningsIds.has(b.innings_id));
+      const fieldingBalls = balls.filter(b => b.fielder_id === pid && validInningsIds.has(b.innings_id));
 
       let runs = 0;
       let ballsFaced = 0;
@@ -59,7 +64,7 @@ const PlayerCompare: React.FC = () => {
         gullyScore
       };
     }).filter(s => s !== null);
-  }, [selectedPlayerIds, players, balls]);
+  }, [selectedPlayerIds, players, balls, validInningsIds]);
 
   const togglePlayer = (id: string) => {
     if (selectedPlayerIds.includes(id)) {

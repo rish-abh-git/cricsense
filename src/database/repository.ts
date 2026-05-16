@@ -25,7 +25,7 @@ export const PlayerRepo = {
 export const MatchRepo = {
   getAll: () => db.matches.orderBy('date').reverse().toArray(),
   getById: (id: string) => db.matches.get(id),
-  create: async (teamA: string, teamB: string, teamAPlayers: string[], teamBPlayers: string[], overs: number, battingFirst?: string, matchAttendance?: string[], tossWinner?: string, optedTo?: 'bat' | 'bowl') => {
+  create: async (teamA: string, teamB: string, teamAPlayers: string[], teamBPlayers: string[], overs: number, battingFirst?: string, matchAttendance?: string[], tossWinner?: string, optedTo?: 'bat' | 'bowl', isBoxCricket?: boolean) => {
     const mId = uuidv4();
     const payload: any = {
       id: mId,
@@ -39,7 +39,9 @@ export const MatchRepo = {
       battingFirst,
       matchAttendance,
       tossWinner,
-      optedTo
+      optedTo,
+      isBoxCricket,
+      is_box_cricket: isBoxCricket
     };
     await db.matches.add(payload);
     supabase.from('matches').upsert(mapMatchPayload(payload)).then();
@@ -94,6 +96,9 @@ export const InningsRepo = {
     const record = await db.innings.get(id);
     if (!record) return;
     
+    const match = await db.matches.get(record.match_id);
+    const isBoxCricket = match?.is_box_cricket || match?.isBoxCricket;
+    
     const isLegalDelivery = extra_type !== 'wide' && extra_type !== 'no_ball';
     const extraRuns = (extra_type === 'wide' || extra_type === 'no_ball') ? 1 : 0;
     const totalRuns = runs + extraRuns;
@@ -115,9 +120,11 @@ export const InningsRepo = {
     const isOverEnd = nextBallsBowled % 6 === 0 && isLegalDelivery && nextBallsBowled > 0;
     
     if (isOverEnd) {
-      const temp = newStrikerId;
-      newStrikerId = newNonStrikerId;
-      newNonStrikerId = temp;
+      if (!isBoxCricket) {
+        const temp = newStrikerId;
+        newStrikerId = newNonStrikerId;
+        newNonStrikerId = temp;
+      }
       clearBowler = true;
     }
 

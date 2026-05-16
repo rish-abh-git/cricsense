@@ -42,6 +42,7 @@ const MatchSetup: React.FC = () => {
   const [step, setStep] = useState<SetupStep>('teams');
   const [tossWinner, setTossWinner] = useState<string>('');
   const [tossDecision, setTossDecision] = useState<'bat' | 'bowl'>('bat');
+  const [isBoxCricket, setIsBoxCricket] = useState(false);
 
   useEffect(() => {
     const fetchLastMatch = async () => {
@@ -142,7 +143,8 @@ const MatchSetup: React.FC = () => {
       bt,
       undefined, // attendance removed
       tossWinner,
-      tossDecision
+      tossDecision,
+      isBoxCricket
     );
 
     // Mock target (feature 2.3)
@@ -239,6 +241,19 @@ const MatchSetup: React.FC = () => {
       )}
 
       <div className="space-y-4 mb-6">
+        <label className="flex items-center gap-3 p-4 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-900 dark:text-indigo-100 rounded-xl border border-indigo-200 dark:border-indigo-800/50 cursor-pointer hover:bg-indigo-100 dark:hover:bg-indigo-900/30 transition-colors shadow-sm">
+          <input 
+            type="checkbox" 
+            checked={isBoxCricket} 
+            onChange={(e) => setIsBoxCricket(e.target.checked)}
+            className="w-5 h-5 rounded text-indigo-600 focus:ring-indigo-500 bg-white border-gray-300" 
+          />
+          <div className="flex flex-col">
+            <span className="font-bold text-sm tracking-wide">Box Cricket Mode</span>
+            <span className="text-xs text-indigo-600/80 dark:text-indigo-300/80 font-medium mt-0.5">Fast scoring & skips player stats leaderboard</span>
+          </div>
+        </label>
+
         <div className="grid grid-cols-2 gap-3">
           <Input
             label="Team A Name"

@@ -38,7 +38,7 @@ const LiveScoring: React.FC = () => {
     return list.reduce((prev, current) => (prev.innings_number > current.innings_number) ? prev : current);
   }, [matchId, editInningsNumber]);
 
-  const inningsBalls = useLiveQuery(async () => {
+  const rawInningsBalls = useLiveQuery(async () => {
     if (!activeInnings) return [];
     const iballs = await db.balls.where('innings_id').equals(activeInnings.id).toArray();
     iballs.sort((a, b) => {
@@ -48,6 +48,22 @@ const LiveScoring: React.FC = () => {
     });
     return iballs;
   }, [activeInnings?.id]) ?? [];
+
+  const inningsBalls = useMemo(() => rawInningsBalls.filter(b => b.innings_id === activeInnings?.id), [rawInningsBalls, activeInnings?.id]);
+
+  const innings1Balls = useLiveQuery(async () => {
+    if (!matchId) return [];
+    const list = await db.innings.where('match_id').equals(matchId).toArray();
+    const i1 = list.find(i => i.innings_number === 1);
+    if (!i1) return [];
+    const iballs = await db.balls.where('innings_id').equals(i1.id).toArray();
+    iballs.sort((a, b) => {
+      if (a.timestamp && b.timestamp) return a.timestamp - b.timestamp;
+      if (a.over_number !== b.over_number) return a.over_number - b.over_number;
+      return a.ball_number - b.ball_number;
+    });
+    return iballs;
+  }, [matchId]) ?? [];
 
   const [showWicketModal, setShowWicketModal] = useState(false);
   const [selectedWicketType, setSelectedWicketType] = useState<WicketType | null>(null);
@@ -205,7 +221,7 @@ const LiveScoring: React.FC = () => {
   , [inningsBalls]);
 
   const isInningsComplete = (activeInnings && match)
-    ? (activeInnings.wickets >= 10 || totalLegalBalls >= match.overs * 6)
+    ? (activeInnings.wickets >= ((match.is_box_cricket || match.isBoxCricket) ? 999 : 10) || totalLegalBalls >= match.overs * 6)
     : false;
   const innings1 = inningsList?.find(i => i.innings_number === 1);
   const innings1Runs = innings1?.runs || match?.first_innings_total || 0;
@@ -283,8 +299,12 @@ const LiveScoring: React.FC = () => {
   const handleScoreBall = async (runs: number, extra: ExtraType = 'none', isWicket: boolean = false, wicketType: WicketType = 'none', outPlayerId?: string, fielderId?: string, noStrikeChange: boolean = false) => {
     if (isProcessing) return;
     if (!editInningsNumber && (isMatchComplete || isInningsComplete)) return; // Prevent fast clicking unless editing
+    if (editInningsNumber && totalLegalBalls >= match.overs * 6 && extra !== 'wide' && extra !== 'no_ball') {
+      showToast("Over limit reached for this innings", "error");
+      return;
+    }
 
-    if (!striker || !nonStriker || !bowler) {
+    if (!(match.is_box_cricket || match.isBoxCricket) && (!striker || !nonStriker || !bowler)) {
       showToast("Missing players. Please select them manually.", "info");
       setShowPlayerSelectModal({ type: !striker ? 'striker' : (!nonStriker ? 'non_striker' : 'bowler'), open: true });
       return; 
@@ -307,8 +327,8 @@ const LiveScoring: React.FC = () => {
         innings_id: activeInnings.id,
         over_number: nextOverNumber,
         ball_number: nextBallNumber,
-        batsman_id: striker.id,
-        bowler_id: bowler.id,
+        batsman_id: striker?.id || 'box_ghost',
+        bowler_id: bowler?.id || 'box_ghost',
         runs,
         extra_type: extra,
         extra_runs: extraRuns,
@@ -318,7 +338,7 @@ const LiveScoring: React.FC = () => {
         fielder_id: fielderId
       };
 
-      await BallRepo.add(ball, noStrikeChange);
+      await BallRepo.add(ball, noStrikeChange || match.is_box_cricket || match.isBoxCricket);
 
       setShowWicketModal(false);
       setSelectedWicketType(null);
@@ -600,19 +620,21 @@ const LiveScoring: React.FC = () => {
                   </span>
                   {strStats && <span className="text-sm font-medium text-gray-600 dark:text-gray-300">{strStats.runs}({strStats.ballsFaced})</span>}
                 </div>
-                <div
-                  className={`flex justify-between items-center py-1 text-gray-600 dark:text-gray-300 ${isAdmin ? 'cursor-pointer active:bg-gray-50 dark:bg-gray-900' : ''}`}
-                  onClick={() => {
-                    if (isAdmin) {
-                      if (!nonStriker || window.confirm(`Do you want to replace/retire ${nonStriker.name}?`)) {
-                        setShowPlayerSelectModal({ type: 'non_striker', open: true });
+                {!(match.is_box_cricket || match.isBoxCricket) && (
+                  <div
+                    className={`flex justify-between items-center py-1 text-gray-600 dark:text-gray-300 ${isAdmin ? 'cursor-pointer active:bg-gray-50 dark:bg-gray-900' : ''}`}
+                    onClick={() => {
+                      if (isAdmin) {
+                        if (!nonStriker || window.confirm(`Do you want to replace/retire ${nonStriker.name}?`)) {
+                          setShowPlayerSelectModal({ type: 'non_striker', open: true });
+                        }
                       }
-                    }
-                  }}
-                >
-                  <span className="font-medium truncate">{nonStriker?.name || 'Select Non-Striker'}</span>
-                  {nStrStats && <span className="text-sm">{nStrStats.runs}({nStrStats.ballsFaced})</span>}
-                </div>
+                    }}
+                  >
+                    <span className="font-medium truncate">{nonStriker?.name || 'Select Non-Striker'}</span>
+                    {nStrStats && <span className="text-sm">{nStrStats.runs}({nStrStats.ballsFaced})</span>}
+                  </div>
+                )}
               </Card>
 
               <Card className="p-2 border-l-4 border-l-blue-500">
@@ -626,6 +648,22 @@ const LiveScoring: React.FC = () => {
                 </div>
               </Card>
             </div>
+
+            { (match.is_box_cricket || match.isBoxCricket) && isAdmin && (
+              <div className="mb-2 p-3 bg-indigo-50 dark:bg-indigo-900/20 rounded-xl border border-indigo-100 dark:border-indigo-800">
+                <div className="text-[10px] font-bold uppercase text-indigo-600 dark:text-indigo-400 tracking-wide mb-2">Quick Select Chips</div>
+                <div className="flex gap-2 overflow-x-auto scrollbar-hide">
+                  {bowlingTeamPlayers.map(p => (
+                    <button key={'bowl_'+p.id} onClick={() => db.innings.update(activeInnings.id, { bowler_id: p.id })} className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${bowler?.id === p.id ? 'bg-blue-500 text-white border-blue-600 shadow-sm' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700'}`}>🥎 {p.name}</button>
+                  ))}
+                </div>
+                <div className="flex gap-2 overflow-x-auto scrollbar-hide mt-2">
+                  {battingTeamPlayers.map(p => (
+                    <button key={'bat_'+p.id} onClick={() => db.innings.update(activeInnings.id, { striker_id: p.id })} className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${striker?.id === p.id ? 'bg-amber-500 text-white border-amber-600 shadow-sm' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700'}`}>🏏 {p.name}</button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Scoring Buttons (Admin Only) */}
             {isAdmin && (
@@ -719,6 +757,42 @@ const LiveScoring: React.FC = () => {
                           })}
                         </div>
                         <div className="text-xs font-bold text-gray-900 dark:text-gray-50 bg-gray-100 dark:bg-gray-900 px-1.5 py-0.5 rounded ml-1">{runsInOver}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* 1st Innings Over-wise Summary in Innings 2 */}
+            {activeInnings.innings_number === 2 && innings1Balls.length > 0 && (
+              <div className="mb-4">
+                <div className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase mb-1.5 ml-1">1st Innings Over-wise Summary</div>
+                <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+                  {Array.from({ length: (innings1Balls.length > 0 ? Math.max(...innings1Balls.map(b => b.over_number)) : 0) + 1 }).map((_, idx) => {
+                    const overNumber = idx;
+                    const overBalls = innings1Balls.filter(b => b.over_number === overNumber);
+                    if (overBalls.length === 0) return null;
+
+                    const runsInOver = overBalls.reduce((acc, b) => acc + b.runs + b.extra_runs, 0);
+
+                    return (
+                      <div key={idx} className="flex-shrink-0 bg-gray-100 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700/50 rounded-xl px-3 py-2 flex items-center gap-2 shadow-sm opacity-80">
+                        <div className="w-6 h-6 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 font-bold flex items-center justify-center text-xs">
+                          {idx + 1}
+                        </div>
+                        <div className="flex gap-1 items-center">
+                          {overBalls.map((b, bIdx) => {
+                            const { lbl, color: tColor } = getBallTextDisplay(b);
+                            return (
+                              <React.Fragment key={b.id}>
+                                {bIdx > 0 && <span className="text-gray-300 text-xs">·</span>}
+                                <span className={`text-xs ${tColor}`}>{lbl}</span>
+                              </React.Fragment>
+                            );
+                          })}
+                        </div>
+                        <div className="text-xs font-bold text-gray-700 dark:text-gray-300 bg-gray-200 dark:bg-gray-700 px-1.5 py-0.5 rounded ml-1">{runsInOver}</div>
                       </div>
                     );
                   })}

@@ -64,13 +64,14 @@ const MatchSummary: React.FC = () => {
     const i2 = innings.find(i => i.innings_number === 2);
 
     let winnerText = 'Draw / Pending';
+    const targetWickets = (match.is_box_cricket || match.isBoxCricket) ? 999 : 10;
 
-    if (match.status === 'completed' || (i2 && (i2.runs > i1!.runs || i2.wickets >= 10 || i2.overs >= match.overs))) {
+    if (match.status === 'completed' || (i2 && (i2.runs > (i1?.runs || 0) || i2.wickets >= targetWickets || i2.overs >= match.overs))) {
        if (match.winner) {
          winnerText = `${match.winner} won the match`;
        } else if (i1 && i2) {
          if (i1.runs > i2.runs) winnerText = `${i1.batting_team} won by ${i1.runs - i2.runs} runs`;
-         else if (i2.runs > i1.runs) winnerText = `${i2.batting_team} won by ${10 - i2.wickets} wickets`;
+         else if (i2.runs > i1.runs) winnerText = `${i2.batting_team} won by ${targetWickets === 999 ? 'target chased' : `${10 - i2.wickets} wickets`}`;
          else winnerText = 'Match Tied';
        }
     }
@@ -149,8 +150,8 @@ const MatchSummary: React.FC = () => {
     };
 
     let sText = `🏆 Match Result\n\n` +
-      `${i1?.batting_team}: ${i1?.runs}/${i1?.wickets} (${i1?.overs.toFixed(1)} ov)\n` +
-      `${i2 ? `${i2.batting_team}: ${i2.runs}/${i2.wickets} (${i2.overs.toFixed(1)} ov)\n` : ''}\n` +
+      `${i1 ? `${i1.batting_team}: ${i1.runs}/${i1.wickets} (${i1.overs?.toFixed(1) || '0.0'} ov)\n` : ''}` +
+      `${i2 ? `${i2.batting_team}: ${i2.runs}/${i2.wickets} (${i2.overs?.toFixed(1) || '0.0'} ov)\n` : ''}\n` +
       `${winnerText}\n\n`;
 
     sText += `🏏 Batting:\n`;
@@ -177,17 +178,19 @@ const MatchSummary: React.FC = () => {
       topScorer: tsPlayer ? `${tsPlayer.name} ${topSm.runs} (${topSm.balls})` : '-',
       bestBowler: bbPlayer ? `${bbPlayer.name} ${bestBm.wickets}/${bestBm.runs}` : '-',
       stats: { dotPct: Math.round((totalDots / (totalLegalBalls || 1)) * 100), bndPct: Math.round((totalBoundaries / (totalLegalBalls || 1)) * 100), winner: winnerText },
-      summaryText: sText
+      summaryText: sText,
+      batsmanStats: Array.from(batsmanStats.entries()).map(([id, s]) => ({ id, ...s })),
+      bowlerStats: Array.from(bowlerStats.entries()).map(([id, s]) => ({ id, ...s }))
     };
   }, [match, innings, balls, players]);
 
-  if (!match || !innings || !balls) return (
+  if (!match || !innings || !balls || !players) return (
     <div className="p-4 flex flex-col items-center justify-center h-screen bg-gray-50 dark:bg-gray-900">
       <div className="w-16 h-16 bg-primary-100 dark:bg-primary-900/50 rounded-full flex items-center justify-center mb-4 animate-pulse">
         <div className="w-10 h-10 border-4 border-primary-600 border-t-transparent rounded-full animate-spin"></div>
       </div>
       <p className="text-gray-600 dark:text-gray-400 font-bold uppercase tracking-widest text-xs">CricSense</p>
-      <p className="text-[10px] text-gray-400 dark:text-gray-600 font-medium mt-8 opacity-50">Made by Rishabh Masani</p>
+      <p className="text-[10px] text-gray-400 dark:text-gray-600 font-medium mt-8 opacity-50">Loading...</p>
     </div>
   );
 
