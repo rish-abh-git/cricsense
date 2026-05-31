@@ -12,6 +12,8 @@ import Modal from '../components/Modal';
 import { useToast } from '../components/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { formatOvers } from '../utils/dataUtils';
+import { supabase } from '../database/supabaseClient';
+import { mapMatchPayload } from '../database/syncUtils';
 
 const WICKET_TYPES: WicketType[] = ['bowled', 'caught', 'run_out', 'stumped', 'lbw', 'hit_wicket'];
 
@@ -65,6 +67,10 @@ const LiveScoring: React.FC = () => {
     return iballs;
   }, [matchId]) ?? [];
 
+  const [showSkipInningsModal, setShowSkipInningsModal] = useState(false);
+  const [skipInningsScore, setSkipInningsScore] = useState('');
+  const [showEditInnings1Score, setShowEditInnings1Score] = useState(false);
+  const [editInnings1ScoreValue, setEditInnings1ScoreValue] = useState('');
   const [showWicketModal, setShowWicketModal] = useState(false);
   const [selectedWicketType, setSelectedWicketType] = useState<WicketType | null>(null);
   const [showFielderSelectModal, setShowFielderSelectModal] = useState(false);
@@ -512,16 +518,18 @@ const LiveScoring: React.FC = () => {
               Done
             </Button>
           )}
-          {activeInnings.innings_number === 2 && (
-            <span className="ml-3">Target: <span className="text-white font-bold">{innings1Runs + 1}</span></span>
-          )}
           <div className="text-2xl font-black">{activeInnings.runs}/{activeInnings.wickets}</div>
         </div>
-        {/* Second innings chase info (feature 2.7) */}
-        {chaseInfo && chaseInfo.runsNeeded > 0 && (
+        {/* Second innings chase info + target */}
+        {activeInnings.innings_number === 2 && (
           <div className="flex items-center gap-3 mt-1.5 pt-1.5 border-t border-white/20 text-xs font-medium text-primary-100">
-            <span>Need <span className="text-white font-bold">{chaseInfo.runsNeeded}</span> in <span className="text-white font-bold">{chaseInfo.ballsRemaining}</span> balls</span>
-            <span className="bg-white/15 px-2 py-0.5 rounded-full text-white font-bold">RRR: {chaseInfo.rrr}</span>
+            <span className="bg-white/15 px-2 py-0.5 rounded-full text-white font-bold">Target: {innings1Runs + 1}</span>
+            {chaseInfo && chaseInfo.runsNeeded > 0 && (
+              <>
+                <span>Need <span className="text-white font-bold">{chaseInfo.runsNeeded}</span> in <span className="text-white font-bold">{chaseInfo.ballsRemaining}</span> balls</span>
+                <span className="bg-white/15 px-2 py-0.5 rounded-full text-white font-bold">RRR: {chaseInfo.rrr}</span>
+              </>
+            )}
           </div>
         )}
       </div>
@@ -548,8 +556,21 @@ const LiveScoring: React.FC = () => {
           <>
             <Card className="p-6 text-center space-y-4 mb-4">
               <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-50">Innings Break</h2>
+              <div className="text-gray-600 dark:text-gray-300 font-semibold">
+                {activeInnings.batting_team}: <span className="text-primary-600 font-black text-xl">{activeInnings.runs}/{activeInnings.wickets}</span>
+              </div>
               {isAdmin && (
-                <Button onClick={handleEndInnings} fullWidth>Start Next Innings</Button>
+                <div className="space-y-2">
+                  <Button onClick={handleEndInnings} fullWidth>▶ Start 2nd Innings</Button>
+                  <Button 
+                    variant="outline" 
+                    fullWidth 
+                    onClick={() => setShowSkipInningsModal(true)}
+                    className="border-amber-400 text-amber-700 dark:text-amber-400 dark:border-amber-600"
+                  >
+                    ⏭ Skip — Enter Opponent Score
+                  </Button>
+                </div>
               )}
               {!isAdmin && (
                 <div className="text-gray-500 dark:text-gray-400">Waiting for next innings to start...</div>
@@ -764,6 +785,62 @@ const LiveScoring: React.FC = () => {
               </div>
             )}
 
+            {/* Edit 1st Innings Score — shown in 2nd innings */}
+            {activeInnings.innings_number === 2 && isAdmin && (
+              <div className="mb-3">
+                {!showEditInnings1Score ? (
+                  <button
+                    onClick={() => {
+                      setEditInnings1ScoreValue(String(innings1Runs));
+                      setShowEditInnings1Score(true);
+                    }}
+                    className="w-full flex items-center justify-between px-3 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl text-amber-700 dark:text-amber-300 text-sm font-semibold"
+                  >
+                    <span>1st Innings: <span className="font-black">{innings1Runs}</span> runs</span>
+                    <span className="text-xs bg-amber-100 dark:bg-amber-800 px-2 py-0.5 rounded-full">✏️ Edit</span>
+                  </button>
+                ) : (
+                  <div className="flex gap-2 items-center px-3 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700 rounded-xl">
+                    <span className="text-amber-700 dark:text-amber-300 text-sm font-bold flex-shrink-0">1st Innings:</span>
+                    <input
+                      type="number"
+                      value={editInnings1ScoreValue}
+                      onChange={e => setEditInnings1ScoreValue(e.target.value)}
+                      className="flex-1 px-2 py-1 rounded-lg border border-amber-300 dark:border-amber-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-50 font-bold text-sm outline-none focus:ring-1 focus:ring-amber-400"
+                      placeholder="e.g. 85"
+                    />
+                    <button
+                      onClick={async () => {
+                        const newScore = parseInt(editInnings1ScoreValue);
+                        if (isNaN(newScore) || newScore < 0) { showToast('Invalid score', 'error'); return; }
+                        // Update innings1 record in local DB + Supabase
+                        if (innings1) {
+                          await db.innings.update(innings1.id, { runs: newScore });
+                          const fullInnings = await db.innings.get(innings1.id);
+                          if (fullInnings) supabase.from('innings').upsert(fullInnings).then();
+                        }
+                        // Update match firstInningsTotal in local DB + Supabase
+                        await db.matches.update(match.id, { firstInningsTotal: newScore, first_innings_total: newScore });
+                        const fullMatch = await db.matches.get(match.id);
+                        if (fullMatch) supabase.from('matches').upsert(mapMatchPayload(fullMatch)).then();
+                        setShowEditInnings1Score(false);
+                        showToast('1st innings score updated', 'success');
+                      }}
+                      className="px-3 py-1.5 bg-amber-500 text-white font-bold rounded-lg text-sm flex-shrink-0"
+                    >
+                      Save
+                    </button>
+                    <button
+                      onClick={() => setShowEditInnings1Score(false)}
+                      className="px-2 py-1.5 bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 font-bold rounded-lg text-sm flex-shrink-0"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* 1st Innings Over-wise Summary in Innings 2 */}
             {activeInnings.innings_number === 2 && innings1Balls.length > 0 && (
               <div className="mb-4">
@@ -799,9 +876,106 @@ const LiveScoring: React.FC = () => {
                 </div>
               </div>
             )}
+
+            {/* Dismissed Batsmen Scorecard */}
+            {(() => {
+              const wicketBalls = inningsBalls.filter(b => b.is_wicket && b.player_out_id && b.player_out_id !== 'box_ghost');
+              if (wicketBalls.length === 0) return null;
+              return (
+                <div className="mb-4">
+                  <div className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase mb-1.5 ml-1 flex items-center gap-1.5">
+                    <span>🏏</span> Dismissed Batsmen
+                  </div>
+                  <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden shadow-sm">
+                    {wicketBalls.map((wb, idx) => {
+                      const outPlayer = allPlayers.find(p => p.id === wb.player_out_id);
+                      if (!outPlayer) return null;
+                      const pBalls = inningsBalls.filter(b => b.batsman_id === wb.player_out_id);
+                      const pRuns = pBalls.reduce((acc, b) => acc + b.runs, 0);
+                      const pBallsFaced = pBalls.filter(b => b.extra_type !== 'wide').length;
+                      const pFours = pBalls.filter(b => b.runs === 4 && b.extra_type === 'none').length;
+                      const pSixes = pBalls.filter(b => b.runs === 6 && b.extra_type === 'none').length;
+                      const dismissalType = wb.wicket_type?.replace('_', ' ') || 'out';
+                      return (
+                        <div key={wb.id} className={`flex items-center justify-between px-3 py-2 ${idx > 0 ? 'border-t border-gray-100 dark:border-gray-700/60' : ''}`}>
+                          <div className="flex-1 min-w-0">
+                            <div className="font-bold text-gray-900 dark:text-gray-50 text-sm truncate">{outPlayer.name}</div>
+                            <div className="text-[10px] text-red-500 capitalize font-medium">{dismissalType}</div>
+                          </div>
+                          <div className="text-right flex-shrink-0 ml-3">
+                            <div className="font-black text-gray-900 dark:text-gray-50">
+                              {pRuns} <span className="text-gray-400 font-normal text-xs">({pBallsFaced})</span>
+                            </div>
+                            {(pFours > 0 || pSixes > 0) && (
+                              <div className="text-[10px] text-gray-400">
+                                {pFours > 0 && <span className="text-blue-500 font-bold">{pFours}×4</span>}
+                                {pFours > 0 && pSixes > 0 && <span className="mx-0.5"> </span>}
+                                {pSixes > 0 && <span className="text-primary-500 font-bold">{pSixes}×6</span>}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
           </>
         )}
       </div>
+
+      {/* Skip 2nd Innings Modal */}
+      {showSkipInningsModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <Card className="w-full max-w-sm p-6 animate-in fade-in zoom-in duration-200 space-y-4">
+            <h3 className="text-xl font-bold text-gray-900 dark:text-gray-50 text-center">Skip 2nd Innings</h3>
+            <p className="text-sm text-gray-500 dark:text-gray-400 text-center">
+              Enter how many runs the opponent scored. The match will be ended immediately.
+            </p>
+            <div>
+              <label className="text-xs font-bold text-gray-500 uppercase mb-1.5 block">
+                Opponent's Final Score
+              </label>
+              <input
+                type="number"
+                value={skipInningsScore}
+                onChange={e => setSkipInningsScore(e.target.value)}
+                placeholder="e.g. 72"
+                className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-50 font-bold text-lg outline-none focus:ring-2 focus:ring-primary-500"
+                autoFocus
+              />
+            </div>
+            <div className="flex gap-3">
+              <Button variant="ghost" fullWidth onClick={() => { setShowSkipInningsModal(false); setSkipInningsScore(''); }}>Cancel</Button>
+              <Button
+                variant="primary"
+                fullWidth
+                onClick={async () => {
+                  const opponentRuns = parseInt(skipInningsScore);
+                  if (isNaN(opponentRuns) || opponentRuns < 0) { showToast('Enter a valid score', 'error'); return; }
+                  // Create a skeletal 2nd innings record with the entered score
+                  const bowlingTeam = activeInnings.bowling_team;
+                  const battingTeam = activeInnings.batting_team;
+                  const inningsId = await InningsRepo.create(match.id, bowlingTeam, battingTeam, 2);
+                  await db.innings.update(inningsId, { runs: opponentRuns });
+                  // Determine winner
+                  const firstInningsRuns = activeInnings.runs;
+                  let winner: string | undefined;
+                  if (opponentRuns > firstInningsRuns) winner = bowlingTeam;
+                  else if (opponentRuns < firstInningsRuns) winner = battingTeam;
+                  await MatchRepo.updateStatus(match.id, 'completed', winner);
+                  setShowSkipInningsModal(false);
+                  setSkipInningsScore('');
+                  navigate(`/summary/${match.id}`);
+                }}
+              >
+                End Match
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
 
       {/* Undo snackbar (feature 2.9) */}
       {snackbarUndo && (

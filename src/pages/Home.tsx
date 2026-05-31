@@ -16,8 +16,8 @@ const Home: React.FC = () => {
   const { isAdmin } = useAuth();
 
   const allMatches = useLiveQuery(async () => {
-    const matches = await db.matches.reverse().sortBy('date');
-    return matches.filter(m => !m.is_archived);
+    const matches = await db.matches.orderBy('date').reverse().toArray();
+    return matches.filter(m => !m.is_archived && !m.isArchived);
   }) || [];
   const playersCount = useLiveQuery(async () => {
     const all = await db.players.toArray();
