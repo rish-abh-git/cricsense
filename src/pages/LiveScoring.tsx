@@ -5,7 +5,7 @@ import { db } from '../database/db';
 import { BallRepo, InningsRepo, MatchRepo } from '../database/repository';
 import Button from '../components/Button';
 import Card from '../components/Card';
-import { Undo2, ArrowLeftRight, Mic, MicOff, Pointer, X, RotateCcw } from 'lucide-react';
+import { Undo2, ArrowLeftRight, Pointer, X, RotateCcw } from 'lucide-react';
 import type { WicketType, ExtraType, Ball } from '../database/schema';
 import { PlayerRepo } from '../database/repository';
 import Modal from '../components/Modal';
@@ -92,15 +92,6 @@ const LiveScoring: React.FC = () => {
 
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const [isVoiceMode, setIsVoiceMode] = useState(false);
-  const isVoiceModeRef = useRef(isVoiceMode);
-  const [lastTranscript, setLastTranscript] = useState('');
-
-  useEffect(() => {
-    isVoiceModeRef.current = isVoiceMode;
-    if (!isVoiceMode) setLastTranscript('');
-  }, [isVoiceMode]);
-
   // For run out on extras (feature 2.1)
   const [pendingExtraRunOut, setPendingExtraRunOut] = useState<{ extra: ExtraType, runs: number } | null>(null);
 
@@ -126,85 +117,6 @@ const LiveScoring: React.FC = () => {
   const ballTimelineRef = useRef<HTMLDivElement>(null);
   // Over-wise summary scroll ref (feature 2.4)
   const overSummaryRef = useRef<HTMLDivElement>(null);
-
-  // Voice Recognition Logic
-  useEffect(() => {
-    let recognition: any = null;
-    if (isVoiceMode && ('webkitSpeechRecognition' in window || 'speechRecognition' in window)) {
-      const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).speechRecognition;
-      recognition = new SpeechRecognition();
-      recognition.continuous = true;
-      recognition.interimResults = false;
-      recognition.lang = 'en-US';
-
-      recognition.onresult = (event: any) => {
-        const transcript = event.results[event.results.length - 1][0].transcript.toLowerCase().trim();
-        console.log('Voice Command:', transcript);
-        setLastTranscript(transcript);
-
-        // Mapping spoken numbers to digits
-        const numMap: Record<string, number> = {
-          'zero': 0, 'dot': 0, 'one': 1, 'single': 1, 'two': 2, 'double': 2, 'three': 3,
-          'four': 4, 'boundary': 4, 'five': 5, 'six': 6, '0': 0, '1': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6
-        };
-
-        if (transcript.includes('wicket') || transcript.includes('out') || transcript.includes('run out')) {
-          setShowWicketModal(true);
-        } else if (transcript.includes('undo')) {
-          handleUndo();
-        } else {
-          // Check for extras first
-          const isWide = transcript.includes('wide');
-          const isNoBall = transcript.includes('no ball') || transcript.includes('noball');
-          
-          // Find the first number in transcript
-          const words = transcript.split(' ');
-          let runs = 0;
-          for (const word of words) {
-            if (numMap[word] !== undefined) {
-              runs = numMap[word];
-              break;
-            }
-          }
-
-          if (isWide) handleScoreBall(runs, 'wide');
-          else if (isNoBall) handleScoreBall(runs, 'no_ball');
-          else if (runs > 0 || transcript.includes('zero') || transcript.includes('dot')) {
-             handleScoreBall(runs);
-          }
-        }
-      };
-
-      recognition.onerror = (event: any) => {
-        console.error('Speech recognition error', event.error);
-        if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-          showToast(`Microphone access blocked: ${event.error}`, "error");
-          setIsVoiceMode(false);
-        } else if (event.error !== 'no-speech') {
-          // Log other errors quietly or occasionally toast them
-          console.warn(`Speech recognition warn: ${event.error}`);
-        }
-      };
-
-      recognition.onend = () => {
-        if (isVoiceModeRef.current) {
-          try {
-            recognition.start();
-          } catch (e) {
-            console.error("Failed to restart recognition", e);
-          }
-        }
-      };
-
-      recognition.start();
-    }
-
-    return () => {
-      if (recognition) {
-        recognition.stop();
-      }
-    };
-  }, [isVoiceMode]);
 
   // Removed manual activeInnings useEffect in favor of useLiveQuery
 
@@ -454,6 +366,16 @@ const LiveScoring: React.FC = () => {
     }
   };
 
+  const handleAllOut = async () => {
+    if (!match || !activeInnings) return;
+    const maxWickets = (match.is_box_cricket || match.isBoxCricket) ? 999 : 10;
+    if (activeInnings.wickets < maxWickets) {
+      await db.innings.update(activeInnings.id, { wickets: maxWickets });
+      showToast(`${activeInnings.batting_team} all out`, 'success');
+    }
+    await handleEndInnings();
+  };
+
   const strStats = striker ? getBatsmanStats(striker.id) : null;
   const nStrStats = nonStriker ? getBatsmanStats(nonStriker.id) : null;
   const bwlStats = bowler ? getBowlerStats(bowler.id) : null;
@@ -533,18 +455,6 @@ const LiveScoring: React.FC = () => {
           </div>
         )}
       </div>
-
-      {isAdmin && (
-        <div className="bg-white dark:bg-gray-800 px-3 py-1.5 flex gap-2 border-b dark:border-gray-700">
-           <button
-            onClick={() => setIsVoiceMode(!isVoiceMode)}
-            className={`px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 transition-colors ${isVoiceMode ? 'bg-red-500 text-white animate-pulse' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'}`}
-          >
-            {isVoiceMode ? <Mic size={14} /> : <MicOff size={14} />}
-            {isVoiceMode ? 'Voice ON' : 'Voice Mode'}
-          </button>
-        </div>
-      )}
 
       <div className="p-3 overflow-y-auto flex-1">
         {(isMatchComplete && !editInningsNumber) ? (
@@ -721,6 +631,7 @@ const LiveScoring: React.FC = () => {
                     <Undo2 size={20} />
                   </Button>
                 </div>
+
               </>
             )}
 
@@ -1020,6 +931,15 @@ const LiveScoring: React.FC = () => {
                   {w.replace('_', ' ')}
                 </button>
               ))}
+            </div>
+
+            <div className="mt-3">
+              <Button variant="danger" fullWidth className="mb-3" onClick={async () => {
+                setShowWicketModal(false);
+                await handleAllOut();
+              }}>
+                All Out
+              </Button>
             </div>
 
             <div className="mt-4 border-t pt-4">
@@ -1450,46 +1370,6 @@ const LiveScoring: React.FC = () => {
         onConfirm={modalConfig.onConfirm}
         type={modalConfig.type}
       />
-
-      {isVoiceMode && (
-        <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-slate-950/90 backdrop-blur-xl animate-in fade-in duration-300">
-          <div className="relative flex flex-col items-center text-center p-8 max-w-xs w-full">
-            <button 
-              onClick={() => setIsVoiceMode(false)}
-              className="absolute -top-12 -right-4 w-12 h-12 bg-white/10 hover:bg-white/20 rounded-full flex items-center justify-center text-white transition-colors border border-white/10 backdrop-blur-md"
-            >
-              <X size={24} />
-            </button>
-            
-            <div className="w-28 h-28 bg-red-500/20 rounded-full flex items-center justify-center mb-8 relative">
-              <div className="absolute inset-0 bg-red-500/40 rounded-full animate-ping opacity-50"></div>
-              <div className="absolute inset-2 bg-red-500/30 rounded-full animate-pulse"></div>
-              <Mic size={56} className="text-red-500 relative z-10" />
-            </div>
-            
-            <h2 className="text-3xl font-black text-white mb-2 tracking-tight">Listening...</h2>
-            <p className="text-slate-400 text-sm font-medium mb-12 leading-relaxed px-4">
-              Scoring is active in the background. Speak clearly to log runs.
-            </p>
-            
-            {lastTranscript && (
-              <div className="w-full bg-white/5 border border-white/10 rounded-2xl p-5 animate-in zoom-in-95 duration-300 shadow-2xl">
-                <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-2">Detected Command</p>
-                <div className="flex items-center justify-center gap-2">
-                  <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></div>
-                  <p className="text-white font-bold text-xl capitalize">"{lastTranscript}"</p>
-                </div>
-              </div>
-            )}
-            
-            <div className="mt-12 flex flex-wrap justify-center gap-2 opacity-40">
-              {['1 run', 'wide', 'four', 'wicket'].map(s => (
-                <span key={s} className="text-[10px] font-bold text-white border border-white/20 px-2 py-1 rounded-lg uppercase tracking-wider">{s}</span>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
